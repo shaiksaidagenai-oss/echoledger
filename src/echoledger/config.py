@@ -20,3 +20,7 @@ DB_PATH = f"{DATA_DIR}/echoledger.db"
 # Which newspaper (see sources/american_stories.py) and feeds (see sources/rss.py)
 # Arthur and "Today's Top 10" use.
 NEWSPAPER_KEY = "evening_star"
+
+# Which Claude model writes Arthur's diary + news summaries (configurable per
+# the project's cost-control rule - see llm/client.py for per-model pricing).
+LLM_MODEL = os.getenv("ECHOLEDGER_LLM_MODEL", "claude-haiku-4-5")

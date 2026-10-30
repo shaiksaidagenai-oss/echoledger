@@ -3,13 +3,16 @@ from datetime import date, datetime
 
 import pytest
 
-from echoledger.models import HistoricalArticle, TodayHeadline
+from echoledger.models import ArthurDiaryEntry, HistoricalArticle, TodayHeadline
 from echoledger.storage.db import (
     connect,
+    get_diary_entry,
     get_historical_articles,
     get_today_headlines,
     is_year_ingested,
+    log_llm_usage,
     mark_year_ingested,
+    save_diary_entry,
     save_historical_article,
     save_today_headline,
 )
@@ -87,3 +90,32 @@ def test_year_ingested_tracking(conn: sqlite3.Connection) -> None:
     assert is_year_ingested(conn, 1926, "evening_star") is True
     assert is_year_ingested(conn, 1926, "some_other_paper") is False
     assert is_year_ingested(conn, 1927, "evening_star") is False
+
+
+def test_save_and_get_diary_entry(conn: sqlite3.Connection) -> None:
+    entry = ArthurDiaryEntry(
+        date=date(1926, 10, 29),
+        entry_text="Dear diary, today the papers spoke of President Coolidge...",
+        source_article_ids=["evestar-1926-10-29-p1-001", "evestar-1926-10-29-p1-002"],
+        model="claude-haiku-4-5",
+    )
+
+    save_diary_entry(conn, entry)
+
+    assert get_diary_entry(conn, date(1926, 10, 29)) == entry
+    assert get_diary_entry(conn, date(1926, 10, 30)) is None
+
+
+def test_log_llm_usage_does_not_raise(conn: sqlite3.Connection) -> None:
+    log_llm_usage(
+        conn,
+        purpose="arthur_diary",
+        model="claude-haiku-4-5",
+        input_tokens=500,
+        output_tokens=200,
+        estimated_cost_usd=0.0015,
+    )
+
+    row = conn.execute("SELECT * FROM llm_usage").fetchone()
+    assert row["purpose"] == "arthur_diary"
+    assert row["input_tokens"] == 500

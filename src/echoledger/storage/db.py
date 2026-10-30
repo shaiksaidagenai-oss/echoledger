@@ -6,11 +6,12 @@ relying on sqlite3's old automatic date adapters, which are deprecated.
 
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 from datetime import date, datetime
 
-from echoledger.models import HistoricalArticle, TodayHeadline
+from echoledger.models import ArthurDiaryEntry, HistoricalArticle, TodayHeadline
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS historical_articles (
@@ -39,6 +40,24 @@ CREATE TABLE IF NOT EXISTS ingested_years (
     year INTEGER NOT NULL,
     newspaper TEXT NOT NULL,
     PRIMARY KEY (year, newspaper)
+);
+
+CREATE TABLE IF NOT EXISTS arthur_diary_entries (
+    date TEXT PRIMARY KEY,
+    entry_text TEXT NOT NULL,
+    source_article_ids TEXT NOT NULL,  -- JSON-encoded list[str]
+    model TEXT NOT NULL
+);
+
+-- Non-negotiable cost-control rule: log tokens + cost for every LLM call.
+CREATE TABLE IF NOT EXISTS llm_usage (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    called_at TEXT NOT NULL,
+    purpose TEXT NOT NULL,
+    model TEXT NOT NULL,
+    input_tokens INTEGER NOT NULL,
+    output_tokens INTEGER NOT NULL,
+    estimated_cost_usd REAL NOT NULL
 );
 """
 
@@ -147,3 +166,61 @@ def get_today_headlines(conn: sqlite3.Connection, on_date: date) -> list[TodayHe
         )
         for row in rows
     ]
+
+
+def save_diary_entry(conn: sqlite3.Connection, entry: ArthurDiaryEntry) -> None:
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO arthur_diary_entries
+            (date, entry_text, source_article_ids, model)
+        VALUES (:date, :entry_text, :source_article_ids, :model)
+        """,
+        {
+            "date": entry.date.isoformat(),
+            "entry_text": entry.entry_text,
+            "source_article_ids": json.dumps(entry.source_article_ids),
+            "model": entry.model,
+        },
+    )
+    conn.commit()
+
+
+def get_diary_entry(conn: sqlite3.Connection, on_date: date) -> ArthurDiaryEntry | None:
+    row = conn.execute(
+        "SELECT * FROM arthur_diary_entries WHERE date = ?", (on_date.isoformat(),)
+    ).fetchone()
+    if row is None:
+        return None
+    return ArthurDiaryEntry(
+        date=date.fromisoformat(row["date"]),
+        entry_text=row["entry_text"],
+        source_article_ids=json.loads(row["source_article_ids"]),
+        model=row["model"],
+    )
+
+
+def log_llm_usage(
+    conn: sqlite3.Connection,
+    *,
+    purpose: str,
+    model: str,
+    input_tokens: int,
+    output_tokens: int,
+    estimated_cost_usd: float,
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO llm_usage
+            (called_at, purpose, model, input_tokens, output_tokens, estimated_cost_usd)
+        VALUES (:called_at, :purpose, :model, :input_tokens, :output_tokens, :estimated_cost_usd)
+        """,
+        {
+            "called_at": datetime.now().isoformat(),
+            "purpose": purpose,
+            "model": model,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "estimated_cost_usd": estimated_cost_usd,
+        },
+    )
+    conn.commit()

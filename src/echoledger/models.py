@@ -37,3 +37,15 @@ class TodayHeadline(BaseModel):
     snippet: str
     url: str
     fetched_at: datetime
+
+
+class ArthurDiaryEntry(BaseModel):
+    """Arthur's diary entry for one historical date, grounded in real
+    HistoricalArticles. Leakage prevention (Arthur must not know about
+    anything after his own date) is handled by prompting, not by this
+    model - an automated leakage *judge* is Phase 4, not here yet."""
+
+    date: date
+    entry_text: str
+    source_article_ids: list[str]
+    model: str
