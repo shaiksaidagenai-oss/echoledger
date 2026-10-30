@@ -46,6 +46,28 @@ inside any container here, while the Docker Desktop host app pulls images fine).
 exclude Docker verification from Phase 1's "done" bar rather than block on an environment issue;
 revisit whenever on a different network or with IT's help.
 
+## Phase 2 — Arthur's diary + news summaries + FastAPI: DONE (2026-10-30)
+
+Target deliverable: Arthur writes a real diary entry grounded in HistoricalArticles; today's
+RSS headlines get paraphrased summaries; both served read-only over HTTP.
+
+**Status:** done, all three pieces verified against real APIs/data (not just unit tests).
+- **LLM:** Claude Haiku 4.5 (`ECHOLEDGER_LLM_MODEL` in `.env`, cost-control fit). `llm/client.py`
+  logs tokens/cost for every call to a new `llm_usage` table - the non-negotiable cost-control
+  rule, actually implemented.
+- **`llm/arthur.py`:** `write_diary_entry()`. Leakage prevention is prompt-only (see
+  `ARTHUR_SYSTEM_PROMPT`'s CRITICAL RULE) - an automated leakage *judge* is Phase 4, not built
+  here. Real cost: ~$0.004/entry.
+- **`llm/news_summary.py`:** `summarize_headlines()`, batches one whole day's headlines into a
+  single API call (not one per headline) to save tokens. Real cost: ~$0.004 for 9 headlines.
+- **`api/`:** FastAPI, `GET /today` + `GET /archive/{date}`, DB connection via
+  `Depends(get_db)` so tests never touch the real database file.
+- 45 tests, all passing without network/LLM/real-file access.
+
+**Security incident during setup (resolved, logged for the record):** a real Anthropic API key
+was pasted into chat by mistake. Treated as compromised immediately, revoked, and rotated before
+any use - **never paste a secret into the conversation; put it directly in `.env` instead.**
+
 ### Key decision: 1926 data source
 
 **Decided: US, "American Stories" dataset on Hugging Face**
@@ -77,29 +99,33 @@ API, and NOT an India-based source. Reasoning, for future reference:
 
 ### Open items (not yet decided)
 
-- Which specific 1926 newspaper title(s) to use (need good OCR quality — to be checked once the
-  file is downloaded/extracted).
-- Which RSS feeds for "today's news" (plan: call 1–3 top articles from a chosen feed; needs a
-  concrete feed URL chosen).
-- 1926-article selection strategy: for Phase 1, just pick 1–3 notable articles from the chosen
-  date/title. Smart "does this match today's top story" matching is the **History Echo** feature
-  (Phase 3+, needs embeddings) — do not build that logic prematurely in Phase 1.
+- Newspaper (Evening Star) and RSS feeds (BBC/Guardian/NPR) are resolved — see above.
+- 1926-article selection for Arthur is currently "first 6 front-page articles" — not smart
+  matching to today's top story. That's the **History Echo** feature (Phase 3+, needs
+  embeddings) — do not build that logic prematurely.
+- An automated **leakage judge** (scoring whether Arthur's entries actually avoid anachronisms,
+  beyond just the prompt instruction) is Phase 4, not built yet.
 
-## Tech stack (Phase 1)
+## Tech stack
 
-Python 3.11+ (3.13.1 installed), venv named `EchoLedger/` (gitignored), pydantic, httpx,
-python-dotenv, pytest, ruff, mypy. Ask before adding any dependency not listed here or in
-`pyproject.toml`.
+Python 3.11+ (3.13.1 installed), venv named `EchoLedger/` (gitignored). Dependencies: pydantic,
+httpx, python-dotenv, tzdata (Windows only), anthropic, fastapi, uvicorn. Dev tools: pytest,
+ruff, mypy. Ask before adding any dependency not listed here or in `pyproject.toml`.
 
 ## Repo structure (current)
 
 ```
 echoledger/
 ├── CLAUDE.md / PROGRESS.md / README.md
-├── pyproject.toml / .gitignore / .env.example
+├── pyproject.toml / .gitignore / .env.example / .env (gitignored, has the real API key)
+├── Dockerfile / .dockerignore / .github/workflows/ci.yml
 ├── src/echoledger/
 │   ├── config.py  models.py  cli.py
-│   ├── storage/  sources/  utils/
+│   ├── storage/   (db.py)
+│   ├── sources/   (american_stories.py, rss.py)
+│   ├── utils/     (dates.py)
+│   ├── llm/       (client.py, arthur.py, news_summary.py)
+│   └── api/       (app.py, views.py, schemas.py)
 ├── tests/
 └── data/              # gitignored — downloaded datasets, SQLite db
 ```

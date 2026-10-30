@@ -1,5 +1,35 @@
 # Progress Log
 
+## Session 3 — 2026-10-30 (Phase 2)
+
+**Phase 2 complete: Arthur writes, news gets summarized, both served over HTTP.**
+
+- Chose Claude Haiku 4.5 as the LLM (cost-control fit for a no-budget project). API key set up
+  in `.env` after a real security incident mid-setup: the first key got pasted into chat and had
+  to be revoked/rotated before use - logged here as a reminder, never put secrets in chat.
+- `llm/client.py` - thin Anthropic wrapper + **cost logging**: every call's tokens/cost go into a
+  new `llm_usage` SQLite table (the non-negotiable "log tokens + cost per run" rule, actually
+  implemented, not just documented).
+- `llm/arthur.py` - `write_diary_entry()`, grounded in real HistoricalArticles, leakage prevention
+  via prompting only (an automated leakage *judge* is Phase 4, not this). **Verified for real**
+  against live Claude using real 1926-10-29 Evening Star articles - manual read found no
+  detectable leakage (left the Senate corruption probe genuinely unresolved, no anachronisms).
+  Real cost: $0.0039/entry.
+- `llm/news_summary.py` - `summarize_headlines()`, batches a whole day's headlines into **one**
+  API call (not one per headline) to save tokens, per explicit instruction. Verified for real
+  against today's live BBC/Guardian/NPR headlines - genuine paraphrases, not copied snippet text.
+  Real cost: $0.0040 for all 9 headlines in one call.
+- `api/` - FastAPI app, `GET /today` and `GET /archive/{date}`. DB connection is a FastAPI
+  dependency (`Depends(get_db)`) so tests override it instead of touching the real database file.
+  Falls back to a headline's raw snippet when no summary exists yet, rather than showing nothing.
+  Verified for real by running the actual server and hitting both endpoints.
+- Real bug caught by mypy: a Pydantic field named `date` shadows the `date` *type* for every
+  later field in that same class body - fixed by reordering fields.
+- 45 tests total, all green, none touching the network/LLM/real files.
+
+**Phase 2 "done" per the original roadmap** (Arthur diary + summaries with structured output;
+FastAPI read endpoints) - all three pieces built, tested, and verified against real data/APIs.
+
 ## Session 2 — 2026-10-30
 
 **Milestone: `echoledger fetch` and `echoledger show` work end-to-end with real data.**
