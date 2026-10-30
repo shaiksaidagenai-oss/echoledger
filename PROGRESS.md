@@ -35,9 +35,22 @@
 - [x] GitHub Actions is green
 - [ ] `docker run` executes the CLI - **last remaining item**
 
+**Dockerfile written, but build is blocked — paused, not abandoned:**
+- `Dockerfile` and `.dockerignore` are written and committed. `docker build` itself progresses
+  fine (base image pulls, files copy) but hangs indefinitely at `pip install` - diagnosed as a
+  **container networking problem, not a Dockerfile problem**: even a raw socket connection to a
+  literal IP (bypassing DNS entirely) hangs from inside any container on this machine, while the
+  Docker Desktop host app pulls images fine. Found two VPN-related services actively running
+  (`FortiSSLVPNdaemon`, `openvpnserv`/`openvpnserv2`/`openvpn-gui`) even though their adapters
+  show "Disconnected" - these commonly install low-level network filter drivers that interfere
+  with Docker's internal virtual network regardless of connection state. Likely a work-machine/
+  corporate-network issue, not something to fix mid-session.
+- **Next step when revisited:** try restarting Docker Desktop fully first (simplest); if that
+  doesn't help, check with IT or try on a non-office network. The Dockerfile itself should be
+  correct as-is - this is purely an environment blocker on this one machine.
+
 **Open / next step:**
-- Write the Dockerfile, build the image, confirm `docker run` executes the CLI. This finishes
-  Phase 1.
+- Decide what to work on next (Docker's last Phase 1 item is paused on the above blocker).
 
 ## Session 1 — 2026-10-29
 
