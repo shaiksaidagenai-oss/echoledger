@@ -25,6 +25,16 @@
   Verified for real by running the actual server and hitting both endpoints.
 - Real bug caught by mypy: a Pydantic field named `date` shadows the `date` *type* for every
   later field in that same class body - fixed by reordering fields.
+- **Found and fixed a real gap right after declaring Phase 2 done:** `echoledger fetch` never
+  actually called `write_diary_entry()`/`summarize_headlines()` - everything verified so far came
+  from one-off manual scripts, not the real CLI. Fixed: `fetch` now generates both (idempotent -
+  skips if already done, so re-running never double-spends), `show` now uses `build_daily_view()`
+  (same function the API uses) instead of a stale pre-Phase-2 raw listing. Caught by the user
+  asking "let's check how the output is actually coming."
+- Re-verified end-to-end after the fix: correctly skipped 8 already-summarized headlines, paid
+  for only 1 new one. Arthur's 1926-10-30 entry correctly reported Houdini as "gravely ill"
+  without revealing his actual death the next day (Oct 31, 1926) - an unplanned, real test of
+  leakage prevention against a famous historical event.
 - 45 tests total, all green, none touching the network/LLM/real files.
 
 **Phase 2 "done" per the original roadmap** (Arthur diary + summaries with structured output;
