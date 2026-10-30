@@ -32,10 +32,19 @@ keep code small and readable, explore+plan before writing code.
 - **Cost control** — free sources first, log tokens/cost per LLM run, AWS budget alarm before any
   cloud deployment.
 
-## Current phase: Phase 1 — raw data collection + engineering foundation
+## Phase 1 — raw data collection + engineering foundation: DONE (2026-10-30)
 
 Target deliverable: `echoledger fetch --date YYYY-MM-DD` and `echoledger show --date YYYY-MM-DD`
 work with real data, tests pass, CI is green, Docker runs the CLI. No LLM calls yet — that's Phase 2+.
+
+**Status:** done, with one accepted exception. `fetch`/`show` work with real data, 27 tests pass,
+GitHub Actions is green (see PROGRESS.md for details). The Dockerfile is written and believed
+correct, but `docker build` hangs indefinitely on this machine - diagnosed as a local network
+problem (likely Fortinet/OpenVPN background services interfering with Docker's container
+networking, not a Dockerfile issue: even a raw socket connection to a literal IP hangs from
+inside any container here, while the Docker Desktop host app pulls images fine). Decided to
+exclude Docker verification from Phase 1's "done" bar rather than block on an environment issue;
+revisit whenever on a different network or with IT's help.
 
 ### Key decision: 1926 data source
 

@@ -49,8 +49,11 @@
   doesn't help, check with IT or try on a non-office network. The Dockerfile itself should be
   correct as-is - this is purely an environment blocker on this one machine.
 
-**Open / next step:**
-- Decide what to work on next (Docker's last Phase 1 item is paused on the above blocker).
+**Decision: Docker excluded from Phase 1's "done" bar for now.** The Dockerfile stays in the
+repo as-is (believed correct) but its verification is deferred indefinitely until the network
+blocker is resolved (different network, or IT help) - not required to consider Phase 1 complete.
+
+## Phase 1 — Done (with the Docker exception above)
 
 ## Session 1 — 2026-10-29
 
