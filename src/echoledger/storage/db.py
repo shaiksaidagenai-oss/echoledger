@@ -31,6 +31,14 @@ CREATE TABLE IF NOT EXISTS today_headlines (
     url TEXT NOT NULL,
     fetched_at TEXT NOT NULL
 );
+
+-- Tracks which (year, newspaper) archives we've already fully scanned, so
+-- `fetch` only walks a year's ~1GB tar.gz once rather than on every call.
+CREATE TABLE IF NOT EXISTS ingested_years (
+    year INTEGER NOT NULL,
+    newspaper TEXT NOT NULL,
+    PRIMARY KEY (year, newspaper)
+);
 """
 
 
@@ -98,6 +106,21 @@ def get_historical_articles(conn: sqlite3.Connection, on_date: date) -> list[His
         )
         for row in rows
     ]
+
+
+def is_year_ingested(conn: sqlite3.Connection, year: int, newspaper: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM ingested_years WHERE year = ? AND newspaper = ?", (year, newspaper)
+    ).fetchone()
+    return row is not None
+
+
+def mark_year_ingested(conn: sqlite3.Connection, year: int, newspaper: str) -> None:
+    conn.execute(
+        "INSERT OR REPLACE INTO ingested_years (year, newspaper) VALUES (?, ?)",
+        (year, newspaper),
+    )
+    conn.commit()
 
 
 def get_today_headlines(conn: sqlite3.Connection, on_date: date) -> list[TodayHeadline]:

@@ -8,6 +8,8 @@ from echoledger.storage.db import (
     connect,
     get_historical_articles,
     get_today_headlines,
+    is_year_ingested,
+    mark_year_ingested,
     save_historical_article,
     save_today_headline,
 )
@@ -75,3 +77,13 @@ def test_saving_same_id_twice_replaces_instead_of_duplicating(conn: sqlite3.Conn
 
     assert len(result) == 1
     assert result[0].headline == "Updated headline"
+
+
+def test_year_ingested_tracking(conn: sqlite3.Connection) -> None:
+    assert is_year_ingested(conn, 1926, "evening_star") is False
+
+    mark_year_ingested(conn, 1926, "evening_star")
+
+    assert is_year_ingested(conn, 1926, "evening_star") is True
+    assert is_year_ingested(conn, 1926, "some_other_paper") is False
+    assert is_year_ingested(conn, 1927, "evening_star") is False

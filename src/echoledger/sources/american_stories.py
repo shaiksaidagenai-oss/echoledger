@@ -8,9 +8,14 @@ together, plus a `legibility` tag ("Legible" / "Questionable") per piece.
 
 from __future__ import annotations
 
+import sqlite3
 import tarfile
 from collections.abc import Iterator
+from datetime import date as date_cls
 from typing import Any
+
+from echoledger.models import HistoricalArticle
+from echoledger.storage.db import is_year_ingested, mark_year_ingested, save_historical_article
 
 # Library of Congress identifiers (LCCN) for newspapers we've chosen to use.
 NEWSPAPER_LCCNS = {
@@ -75,3 +80,35 @@ def iter_newspaper_scans(tar_path: str, lccn: str) -> Iterator[tuple[str, int, d
                 continue
             scan = json.loads(extracted.read())
             yield date_str, page_number, scan
+
+
+def ingest_year(
+    conn: sqlite3.Connection, year: int, newspaper_key: str, raw_dir: str
+) -> int:
+    """Walk one year's tar.gz once for one newspaper, saving every legible
+    article for every date found. No-ops (returns 0) if already done -
+    this is the "once per real-world year" cost, not a per-date cost.
+    """
+    if is_year_ingested(conn, year, newspaper_key):
+        return 0
+
+    lccn = NEWSPAPER_LCCNS[newspaper_key]
+    newspaper_name = newspaper_key.replace("_", " ").title()
+    tar_path = f"{raw_dir}/faro_{year}.tar.gz"
+
+    saved = 0
+    for date_str, page, scan in iter_newspaper_scans(tar_path, lccn):
+        for index, article in enumerate(parse_scan(scan)):
+            historical = HistoricalArticle(
+                id=f"{newspaper_key}-{date_str}-p{page}-{index}",
+                date=date_cls.fromisoformat(date_str),
+                newspaper=newspaper_name,
+                page=page,
+                headline=article["headline"],
+                text=article["text"],
+            )
+            save_historical_article(conn, historical)
+            saved += 1
+
+    mark_year_ingested(conn, year, newspaper_key)
+    return saved
