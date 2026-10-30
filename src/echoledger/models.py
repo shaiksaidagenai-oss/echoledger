@@ -49,3 +49,14 @@ class ArthurDiaryEntry(BaseModel):
     entry_text: str
     source_article_ids: list[str]
     model: str
+
+
+class NewsSummary(BaseModel):
+    """An LLM-written 'in our own words' paraphrase of one TodayHeadline -
+    replaces display dependence on the source's own snippet wording, which
+    matters for the copyright rule (summarize, don't just re-show)."""
+
+    headline_id: str
+    date: date
+    summary_text: str
+    model: str

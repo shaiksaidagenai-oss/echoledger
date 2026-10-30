@@ -11,7 +11,7 @@ import os
 import sqlite3
 from datetime import date, datetime
 
-from echoledger.models import ArthurDiaryEntry, HistoricalArticle, TodayHeadline
+from echoledger.models import ArthurDiaryEntry, HistoricalArticle, NewsSummary, TodayHeadline
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS historical_articles (
@@ -46,6 +46,13 @@ CREATE TABLE IF NOT EXISTS arthur_diary_entries (
     date TEXT PRIMARY KEY,
     entry_text TEXT NOT NULL,
     source_article_ids TEXT NOT NULL,  -- JSON-encoded list[str]
+    model TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS news_summaries (
+    headline_id TEXT PRIMARY KEY,
+    date TEXT NOT NULL,
+    summary_text TEXT NOT NULL,
     model TEXT NOT NULL
 );
 
@@ -197,6 +204,37 @@ def get_diary_entry(conn: sqlite3.Connection, on_date: date) -> ArthurDiaryEntry
         source_article_ids=json.loads(row["source_article_ids"]),
         model=row["model"],
     )
+
+
+def save_news_summary(conn: sqlite3.Connection, summary: NewsSummary) -> None:
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO news_summaries (headline_id, date, summary_text, model)
+        VALUES (:headline_id, :date, :summary_text, :model)
+        """,
+        {
+            "headline_id": summary.headline_id,
+            "date": summary.date.isoformat(),
+            "summary_text": summary.summary_text,
+            "model": summary.model,
+        },
+    )
+    conn.commit()
+
+
+def get_news_summaries(conn: sqlite3.Connection, on_date: date) -> list[NewsSummary]:
+    rows = conn.execute(
+        "SELECT * FROM news_summaries WHERE date = ?", (on_date.isoformat(),)
+    ).fetchall()
+    return [
+        NewsSummary(
+            headline_id=row["headline_id"],
+            date=date.fromisoformat(row["date"]),
+            summary_text=row["summary_text"],
+            model=row["model"],
+        )
+        for row in rows
+    ]
 
 
 def log_llm_usage(

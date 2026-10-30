@@ -3,17 +3,19 @@ from datetime import date, datetime
 
 import pytest
 
-from echoledger.models import ArthurDiaryEntry, HistoricalArticle, TodayHeadline
+from echoledger.models import ArthurDiaryEntry, HistoricalArticle, NewsSummary, TodayHeadline
 from echoledger.storage.db import (
     connect,
     get_diary_entry,
     get_historical_articles,
+    get_news_summaries,
     get_today_headlines,
     is_year_ingested,
     log_llm_usage,
     mark_year_ingested,
     save_diary_entry,
     save_historical_article,
+    save_news_summary,
     save_today_headline,
 )
 
@@ -119,3 +121,17 @@ def test_log_llm_usage_does_not_raise(conn: sqlite3.Connection) -> None:
     row = conn.execute("SELECT * FROM llm_usage").fetchone()
     assert row["purpose"] == "arthur_diary"
     assert row["input_tokens"] == 500
+
+
+def test_save_and_get_news_summary(conn: sqlite3.Connection) -> None:
+    summary = NewsSummary(
+        headline_id="bbc-abc123",
+        date=date(2026, 10, 30),
+        summary_text="A short paraphrased summary of the story.",
+        model="claude-haiku-4-5",
+    )
+
+    save_news_summary(conn, summary)
+
+    assert get_news_summaries(conn, date(2026, 10, 30)) == [summary]
+    assert get_news_summaries(conn, date(2026, 10, 31)) == []
