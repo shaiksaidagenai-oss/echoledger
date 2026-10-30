@@ -6,6 +6,7 @@ relying on sqlite3's old automatic date adapters, which are deprecated.
 
 from __future__ import annotations
 
+import os
 import sqlite3
 from datetime import date, datetime
 
@@ -44,6 +45,9 @@ CREATE TABLE IF NOT EXISTS ingested_years (
 
 def connect(db_path: str) -> sqlite3.Connection:
     """Open a connection and make sure both tables exist."""
+    directory = os.path.dirname(db_path)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     conn.executescript(_SCHEMA)
@@ -51,6 +55,10 @@ def connect(db_path: str) -> sqlite3.Connection:
 
 
 def save_historical_article(conn: sqlite3.Connection, article: HistoricalArticle) -> None:
+    """Does NOT commit - callers doing a single save should commit themselves;
+    callers doing many saves (e.g. ingest_year) should commit once at the end.
+    Committing after every row is what made a full year's ~65k-article
+    ingest take many minutes instead of seconds."""
     conn.execute(
         """
         INSERT OR REPLACE INTO historical_articles
@@ -67,7 +75,6 @@ def save_historical_article(conn: sqlite3.Connection, article: HistoricalArticle
             "source_url": article.source_url,
         },
     )
-    conn.commit()
 
 
 def save_today_headline(conn: sqlite3.Connection, headline: TodayHeadline) -> None:
@@ -92,7 +99,8 @@ def save_today_headline(conn: sqlite3.Connection, headline: TodayHeadline) -> No
 
 def get_historical_articles(conn: sqlite3.Connection, on_date: date) -> list[HistoricalArticle]:
     rows = conn.execute(
-        "SELECT * FROM historical_articles WHERE date = ?", (on_date.isoformat(),)
+        "SELECT * FROM historical_articles WHERE date = ? ORDER BY page, id",
+        (on_date.isoformat(),),
     ).fetchall()
     return [
         HistoricalArticle(

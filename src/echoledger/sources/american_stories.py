@@ -110,5 +110,5 @@ def ingest_year(
             save_historical_article(conn, historical)
             saved += 1
 
-    mark_year_ingested(conn, year, newspaper_key)
+    mark_year_ingested(conn, year, newspaper_key)  # commits everything in one go
     return saved
