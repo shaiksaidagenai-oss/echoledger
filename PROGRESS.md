@@ -22,10 +22,22 @@
   visiting James Monroe's old home, a bandit sentencing, a Senate slush-fund probe) shown
   alongside live BBC/Guardian/NPR headlines for 2026-10-29.
 
+- Added `.github/workflows/ci.yml` (checkout, Python 3.11, install, ruff, mypy, pytest).
+- Created GitHub repo at https://github.com/shaiksaidagenai-oss/echoledger, pushed all commits.
+  Hit a real snag: Windows had a stale cached GitHub login for a different account
+  (`isk22083-eng`, unrelated to this project) which caused a 403 on push. Fixed by clearing
+  that one cached credential via `cmdkey /delete:...` (the office GitLab credentials were left
+  untouched - different host, unaffected). **CI ran green on the very first push.**
+
+**Phase 1 "done" checklist status:**
+- [x] `echoledger fetch`/`show` work with real data
+- [x] pytest passes
+- [x] GitHub Actions is green
+- [ ] `docker run` executes the CLI - **last remaining item**
+
 **Open / next step:**
-- GitHub Actions CI workflow (ruff + mypy + pytest on push/PR).
-- Dockerfile that runs the CLI.
-- Those two are the only things left for the Phase 1 "done" checklist in CLAUDE.md.
+- Write the Dockerfile, build the image, confirm `docker run` executes the CLI. This finishes
+  Phase 1.
 
 ## Session 1 — 2026-10-29
 
