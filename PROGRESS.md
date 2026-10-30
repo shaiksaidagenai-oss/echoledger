@@ -1,5 +1,32 @@
 # Progress Log
 
+## Session 2 — 2026-10-30
+
+**Milestone: `echoledger fetch` and `echoledger show` work end-to-end with real data.**
+
+- Chose "Evening Star" (Washington D.C.) as Arthur's newspaper (`NEWSPAPER_KEY` in config.py).
+- Chose RSS feeds for today's news: BBC News, The Guardian, NPR (all verified live).
+- Built, tested, and committed: `models.py` (HistoricalArticle / TodayHeadline - two separate
+  types so the copyright rule is structurally enforced, not just a convention),
+  `storage/db.py` (SQLite, stdlib only), `utils/dates.py` (today()/years_ago(), handles Feb 29),
+  `sources/american_stories.py` (parses scan-level JSON into articles, `ingest_year()` does the
+  one-time full-year scan), `sources/rss.py` (fetches + hard-truncates snippets to 300 chars),
+  `cli.py` (the `fetch`/`show` commands). 27 tests, all passing, no network/big-file dependency
+  in the test suite itself (synthetic fixtures + httpx.MockTransport).
+- **Real bug found and fixed while testing for real** (not caught by unit tests, since those use
+  tiny fixtures): `save_historical_article` committed to SQLite after every row. A full year's
+  ~65k articles meant 65k individual disk-sync commits — still running after 5+ minutes, killed
+  it. Fixed to commit once at the end instead (also makes the whole year-ingest atomic). Real
+  run after the fix: ~35 seconds for the full first-time ingest of 1926.
+- Verified real output end-to-end: Evening Star's actual front page for 1926-10-29 (Coolidge
+  visiting James Monroe's old home, a bandit sentencing, a Senate slush-fund probe) shown
+  alongside live BBC/Guardian/NPR headlines for 2026-10-29.
+
+**Open / next step:**
+- GitHub Actions CI workflow (ruff + mypy + pytest on push/PR).
+- Dockerfile that runs the CLI.
+- Those two are the only things left for the Phase 1 "done" checklist in CLAUDE.md.
+
 ## Session 1 — 2026-10-29
 
 **Done:**
