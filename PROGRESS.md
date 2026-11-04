@@ -1,5 +1,25 @@
 # Progress Log
 
+## Session 6, continued — Regeneration loop + a real crash fix
+
+**Directly strengthened the highest-leakage-risk content, per explicit request.**
+
+- Rejecting a diary entry used to be final. Added a real third option: **regenerate** (up to
+  `max_attempts`, default 3) - a genuine use of LangGraph's `add_conditional_edges()` to loop
+  `write -> judge -> approval` back on itself, not just a linear pipe anymore.
+- `get_approval`'s signature changed to return `"approve"/"reject"/"regenerate"` and takes
+  attempt/max_attempts so the prompt shows "attempt 2/3" and only offers regenerate when
+  attempts remain.
+- **Verified for real, interactively**: answered "r" then "y" on a fresh date - a genuinely
+  different second draft was written, then approved. Confirmed working end-to-end.
+- **That same real test surfaced an unrelated real crash**: 1926-11-07 has 1519 historical
+  articles, and embedding all of them in one request pushed past OpenAI's 300k-token limit
+  (~417k tokens), crashing `fetch` partway through (the diary entry had already been saved
+  safely before the crash, so no data was lost). Fixed `embed_texts()` to batch large inputs by
+  a conservative character-count budget. Re-ran the exact fetch that had crashed - completed
+  cleanly this time, indexing all 1519 articles.
+- 92 tests total, all green.
+
 ## Session 6 — LangGraph diary workflow (Phase 5, part 1 of 2)
 
 **Not Phase 5 complete yet - just the LangGraph + human-approval half. The A2A Verification
