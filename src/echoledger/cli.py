@@ -51,7 +51,10 @@ def _ask_for_diary_approval(entry_text: str, verdict: str | None, violations: li
         print("  Violations flagged:")
         for violation in violations:
             print(f"    - {violation}")
-    answer = input("\n  Approve this entry? [y/n]: ").strip().lower()
+    # .strip("﻿...") also strips a leading BOM - some shells (PowerShell's
+    # `"y" | command` in particular) prepend one when piping text to stdin,
+    # which plain .strip() leaves behind since it isn't whitespace.
+    answer = input("\n  Approve this entry? [y/n]: ").strip("﻿ \t\r\n").lower()
     return answer == "y"
 
 

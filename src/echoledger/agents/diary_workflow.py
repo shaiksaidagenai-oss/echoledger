@@ -7,6 +7,13 @@ process invocations - this avoids needing a persistent checkpointer,
 while still genuinely using interrupt()/Command(resume=...), LangGraph's
 real mechanism for pausing a graph until a human responds.
 
+Graph state holds only plain JSON-safe primitives (str/list/bool), never
+a Pydantic object - found the hard way (a real run, see PROGRESS.md) that
+LangGraph's checkpointer serializes state internally even with
+InMemorySaver, and doesn't know how to deserialize arbitrary custom
+types. The real ArthurDiaryEntry is only ever constructed outside the
+graph, from these primitives, once the workflow finishes.
+
 `get_approval` is injected (same dependency-injection pattern used
 everywhere else in this project for the real API clients) so tests can
 pass a canned function instead of a real terminal prompt.
@@ -31,7 +38,8 @@ from echoledger.storage.db import set_diary_approved
 
 
 class _DiaryWorkflowState(TypedDict):
-    entry: ArthurDiaryEntry | None
+    entry_text: str | None
+    source_article_ids: list[str]
     verdict: str | None
     violations: list[str]
     approved: bool
@@ -51,18 +59,25 @@ def run_diary_workflow(
 
     def write_node(state: _DiaryWorkflowState) -> dict[str, object]:
         entry = write_diary_entry(conn, historical_date, articles, model, client=client)
-        return {"entry": entry}
+        return {"entry_text": entry.entry_text, "source_article_ids": entry.source_article_ids}
 
     def judge_node(state: _DiaryWorkflowState) -> dict[str, object]:
-        assert state["entry"] is not None
-        judgment = judge_diary_entry(conn, state["entry"], model=model, client=client)
+        assert state["entry_text"] is not None
+        # judge_diary_entry needs an ArthurDiaryEntry - built fresh here from
+        # plain state, never stored back into the graph's own state.
+        draft = ArthurDiaryEntry(
+            date=historical_date,
+            entry_text=state["entry_text"],
+            source_article_ids=state["source_article_ids"],
+            model=model,
+        )
+        judgment = judge_diary_entry(conn, draft, model=model, client=client)
         return {"verdict": judgment.verdict, "violations": judgment.violations}
 
     def approval_node(state: _DiaryWorkflowState) -> dict[str, object]:
-        assert state["entry"] is not None
         decision = interrupt(
             {
-                "entry_text": state["entry"].entry_text,
+                "entry_text": state["entry_text"],
                 "verdict": state["verdict"],
                 "violations": state["violations"],
             }
@@ -70,10 +85,8 @@ def run_diary_workflow(
         return {"approved": bool(decision)}
 
     def finalize_node(state: _DiaryWorkflowState) -> dict[str, object]:
-        assert state["entry"] is not None
         set_diary_approved(conn, historical_date, state["approved"])
-        updated_entry = state["entry"].model_copy(update={"approved": state["approved"]})
-        return {"entry": updated_entry}
+        return {}
 
     builder = StateGraph(_DiaryWorkflowState)
     builder.add_node("write", write_node)
@@ -88,7 +101,8 @@ def run_diary_workflow(
 
     config = {"configurable": {"thread_id": f"diary-{historical_date.isoformat()}"}}
     initial_state: _DiaryWorkflowState = {
-        "entry": None,
+        "entry_text": None,
+        "source_article_ids": [],
         "verdict": None,
         "violations": [],
         "approved": False,
@@ -103,6 +117,12 @@ def run_diary_workflow(
         decision = get_approval(payload["entry_text"], payload["verdict"], payload["violations"])
         result = graph.invoke(Command(resume=decision), config)  # type: ignore[call-overload]
 
-    entry = result["entry"]
-    assert isinstance(entry, ArthurDiaryEntry)
-    return entry
+    entry_text = result["entry_text"]
+    assert isinstance(entry_text, str)
+    return ArthurDiaryEntry(
+        date=historical_date,
+        entry_text=entry_text,
+        source_article_ids=result["source_article_ids"],
+        model=model,
+        approved=result["approved"],
+    )
