@@ -79,7 +79,8 @@ def build_daily_view(conn: sqlite3.Connection, on_date: date) -> DailyView:
         date=on_date,
         historical_date=historical_date,
         historical_newspaper=historical_newspaper,
-        diary_entry=diary.entry_text if diary else None,
+        diary_entry=diary.entry_text if diary and diary.approved else None,
+        diary_pending=diary is not None and not diary.approved,
         news=news,
         predictions=predictions,
     )

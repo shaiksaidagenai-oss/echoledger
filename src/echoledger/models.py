@@ -43,12 +43,17 @@ class ArthurDiaryEntry(BaseModel):
     """Arthur's diary entry for one historical date, grounded in real
     HistoricalArticles. Leakage prevention at generation time is
     prompting only - see LeakageJudgment below for the separate,
-    dedicated check."""
+    dedicated check.
+
+    `approved` gates whether `show`/the API display entry_text at all -
+    the "nothing publishes without an authenticated approve step" rule,
+    finally given real teeth in Phase 5 (see agents/diary_workflow.py)."""
 
     date: date
     entry_text: str
     source_article_ids: list[str]
     model: str
+    approved: bool = False
 
 
 class LeakageJudgment(BaseModel):

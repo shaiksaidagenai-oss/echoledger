@@ -5,12 +5,11 @@ from __future__ import annotations
 import argparse
 from datetime import date
 
+from echoledger.agents.diary_workflow import run_diary_workflow
 from echoledger.api.views import build_daily_view
 from echoledger.config import DB_PATH, LLM_MODEL, NEWSPAPER_KEY, RAW_DIR
 from echoledger.evals.brier import brier_score
-from echoledger.evals.leakage_judge import judge_diary_entry
 from echoledger.guardrails.injection import detect_injection_markers
-from echoledger.llm.arthur import write_diary_entry
 from echoledger.llm.news_summary import summarize_headlines
 from echoledger.llm.predictions import generate_predictions, resolve_predictions
 from echoledger.rag.echo import find_echo_candidates
@@ -40,6 +39,20 @@ def _parse_date(value: str) -> date:
         raise argparse.ArgumentTypeError(
             f"not a valid date (expected YYYY-MM-DD): {value!r}"
         ) from exc
+
+
+def _ask_for_diary_approval(entry_text: str, verdict: str | None, violations: list[str]) -> bool:
+    """The real human-in-the-loop step: Arthur's draft is shown right here
+    in the terminal, and `fetch` genuinely pauses until you answer."""
+    print("\n  === Draft diary entry, awaiting your approval ===")
+    print(entry_text)
+    print(f"\n  Leakage judge verdict: {verdict}")
+    if violations:
+        print("  Violations flagged:")
+        for violation in violations:
+            print(f"    - {violation}")
+    answer = input("\n  Approve this entry? [y/n]: ").strip().lower()
+    return answer == "y"
 
 
 def cmd_fetch(args: argparse.Namespace) -> None:
@@ -75,15 +88,16 @@ def cmd_fetch(args: argparse.Namespace) -> None:
     # LLM steps - each checks first and skips if already done, so re-running
     # `fetch` for a date you've already processed never spends money twice.
     if get_diary_entry(conn, historical_date) is None:
-        entry = write_diary_entry(conn, historical_date, historical_articles, model=LLM_MODEL)
-        print(f"  Arthur wrote his diary entry for {historical_date} ({LLM_MODEL}).")
-        judgment = judge_diary_entry(conn, entry, model=LLM_MODEL)
-        if judgment.verdict == "fail":
-            print(f"  [!] LEAKAGE WARNING for {historical_date}:")
-            for violation in judgment.violations:
-                print(f"      - {violation}")
-        else:
-            print(f"  Leakage judge: pass ({historical_date}).")
+        print(f"  Arthur is writing his diary entry for {historical_date} ({LLM_MODEL})...")
+        entry = run_diary_workflow(
+            conn,
+            historical_date,
+            historical_articles,
+            model=LLM_MODEL,
+            get_approval=_ask_for_diary_approval,
+        )
+        status = "approved" if entry.approved else "rejected"
+        print(f"  Arthur's diary entry for {historical_date}: {status}.")
     else:
         print(f"  Arthur's diary entry for {historical_date} already exists - skipping.")
 
@@ -146,7 +160,9 @@ def cmd_show(args: argparse.Namespace) -> None:
 
     newspaper = view.historical_newspaper or "the newspaper"
     print(f"--- Arthur's Diary, {view.historical_date.isoformat()} ({newspaper}) ---")
-    if view.diary_entry is None:
+    if view.diary_pending:
+        print("  (a draft exists but was not approved - not shown)")
+    elif view.diary_entry is None:
         print("  (nothing cached yet - run `echoledger fetch` first)")
     else:
         print(view.diary_entry)

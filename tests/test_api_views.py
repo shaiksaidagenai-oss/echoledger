@@ -35,6 +35,7 @@ def test_build_daily_view_with_no_data_at_all(conn: sqlite3.Connection) -> None:
     assert view.historical_date == date(1926, 10, 30)
     assert view.historical_newspaper is None
     assert view.diary_entry is None
+    assert view.diary_pending is False  # no diary exists at all, so nothing's "pending"
     assert view.news == []
 
 
@@ -57,6 +58,7 @@ def test_build_daily_view_combines_everything(conn: sqlite3.Connection) -> None:
             entry_text="Dear diary...",
             source_article_ids=["a1"],
             model="claude-haiku-4-5",
+            approved=True,
         ),
     )
     save_today_headline(
@@ -85,8 +87,27 @@ def test_build_daily_view_combines_everything(conn: sqlite3.Connection) -> None:
 
     assert view.historical_newspaper == "Evening Star"
     assert view.diary_entry == "Dear diary..."
+    assert view.diary_pending is False
     assert len(view.news) == 1
     assert view.news[0].summary == "Our paraphrased summary."  # not the raw snippet
+
+
+def test_build_daily_view_hides_an_unapproved_diary_entry(conn: sqlite3.Connection) -> None:
+    save_diary_entry(
+        conn,
+        ArthurDiaryEntry(
+            date=date(1926, 10, 30),
+            entry_text="A draft nobody has approved yet.",
+            source_article_ids=["a1"],
+            model="claude-haiku-4-5",
+            approved=False,
+        ),
+    )
+
+    view = build_daily_view(conn, date(2026, 10, 30))
+
+    assert view.diary_entry is None  # never leaks the unapproved text
+    assert view.diary_pending is True
 
 
 def test_build_daily_view_falls_back_to_snippet_without_a_summary_yet(

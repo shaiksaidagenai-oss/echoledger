@@ -13,6 +13,7 @@ dependencies = [
     "uvicorn>=0.30",
     "openai>=1.50",
     "chromadb>=0.5",
+    "langgraph>=0.2",
 ]
 
 [project.optional-dependencies]

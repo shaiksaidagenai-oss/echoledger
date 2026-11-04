@@ -55,7 +55,8 @@ CREATE TABLE IF NOT EXISTS arthur_diary_entries (
     date TEXT PRIMARY KEY,
     entry_text TEXT NOT NULL,
     source_article_ids TEXT NOT NULL,  -- JSON-encoded list[str]
-    model TEXT NOT NULL
+    model TEXT NOT NULL,
+    approved INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS news_summaries (
@@ -117,6 +118,15 @@ CREATE TABLE IF NOT EXISTS llm_usage (
 """
 
 
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, add_column_ddl: str) -> None:
+    """CREATE TABLE IF NOT EXISTS doesn't add columns to an already-existing
+    table - a real database created before this column existed would be
+    missing it. This adds it in place rather than losing existing data."""
+    existing_columns = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+    if column not in existing_columns:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {add_column_ddl}")
+
+
 def connect(db_path: str) -> sqlite3.Connection:
     """Open a connection and make sure both tables exist."""
     directory = os.path.dirname(db_path)
@@ -125,6 +135,10 @@ def connect(db_path: str) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     conn.executescript(_SCHEMA)
+    _ensure_column(
+        conn, "arthur_diary_entries", "approved", "approved INTEGER NOT NULL DEFAULT 0"
+    )
+    conn.commit()
     return conn
 
 
@@ -227,15 +241,24 @@ def save_diary_entry(conn: sqlite3.Connection, entry: ArthurDiaryEntry) -> None:
     conn.execute(
         """
         INSERT OR REPLACE INTO arthur_diary_entries
-            (date, entry_text, source_article_ids, model)
-        VALUES (:date, :entry_text, :source_article_ids, :model)
+            (date, entry_text, source_article_ids, model, approved)
+        VALUES (:date, :entry_text, :source_article_ids, :model, :approved)
         """,
         {
             "date": entry.date.isoformat(),
             "entry_text": entry.entry_text,
             "source_article_ids": json.dumps(entry.source_article_ids),
             "model": entry.model,
+            "approved": int(entry.approved),
         },
+    )
+    conn.commit()
+
+
+def set_diary_approved(conn: sqlite3.Connection, on_date: date, approved: bool) -> None:
+    conn.execute(
+        "UPDATE arthur_diary_entries SET approved = ? WHERE date = ?",
+        (int(approved), on_date.isoformat()),
     )
     conn.commit()
 
@@ -251,6 +274,7 @@ def get_diary_entry(conn: sqlite3.Connection, on_date: date) -> ArthurDiaryEntry
         entry_text=row["entry_text"],
         source_article_ids=json.loads(row["source_article_ids"]),
         model=row["model"],
+        approved=bool(row["approved"]),
     )
 
 

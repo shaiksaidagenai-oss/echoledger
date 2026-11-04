@@ -37,6 +37,7 @@ class DailyView(BaseModel):
     date: date
     historical_newspaper: str | None
     diary_entry: str | None
+    diary_pending: bool  # True if a draft exists but hasn't been approved yet
     news: list[NewsItemView]
     predictions: list[PredictionView]
 
