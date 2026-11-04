@@ -46,3 +46,7 @@ strict = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "real_api: calls the real Claude API and costs real money - excluded by default, run explicitly with `pytest -m real_api`",
+]
+addopts = "-m 'not real_api'"
