@@ -91,6 +91,36 @@ time-filtered similarity search; History Echo matches found and surfaced via `sh
   exactly 100 years.
 - 52 tests, all passing without touching the real vector store or making real API calls.
 
+## Phase 4 — predictions, leakage judge, guardrails, eval gate: DONE (2026-11-04)
+
+Target deliverable: checkable predictions scored over time; an automated check on Arthur's
+leakage (not just the prompt instruction); basic guardrails; a real-API eval gate in CI.
+
+**Status:** done, all four pieces verified for real, not just unit tests.
+- **Prediction Ledger:** `Prediction`/`PredictionResolution` as two separate, INSERT-only
+  tables (saving the same id twice raises `IntegrityError` - immutability enforced at the DB
+  level). Resolution is fully automatic (user's call) but grounded ONLY in our own accumulated
+  real news, never Claude's training knowledge. `outcome` is "true"/"false"/"unclear" -
+  "unclear" is an honest result, correctly excluded from `evals/brier.py`'s Brier score.
+- **Leakage judge** (`evals/leakage_judge.py`): a separate Claude call reviewing a completed
+  diary entry - the judge is SUPPOSED to use full historical knowledge (opposite of Arthur's own
+  generation). Verified for real: caught all 4 violations in a deliberately leaky planted entry
+  (1929 crash, Houdini's death stated as fact, TV, WWII). **Also found a genuine false positive**
+  on Arthur's real Oct 29 entry (flagged real, legitimate 1926 news as suspicious) - root cause:
+  the judge never sees the original source articles, so it can't verify grounding. Left in the
+  database and documented rather than hidden - a real limitation to revisit.
+- **Guardrails:** finance-topic keyword filter (predictions), prompt-injection detection +
+  `<tag>`-delimited untrusted content in every prompt (verified for real: a planted "IGNORE ALL
+  PREVIOUS INSTRUCTIONS" injection was completely ignored by the real model), copyright
+  similarity check (a summary that echoes its source gets rejected, falls back to the raw
+  snippet). API auth/rate limiting deliberately NOT built - no public exposure yet, revisit at
+  Phase 7.
+- **Eval gate in CI:** `tests/test_real_leakage_eval.py`, a golden-set eval against the REAL
+  API, marked `real_api` and excluded from the default (free, fast) `pytest` run. New
+  `.github/workflows/eval.yml` runs it weekly + on manual dispatch - needs an
+  `ANTHROPIC_API_KEY` GitHub secret (not yet added).
+- 87 tests total (85 fast + 2 real-API), all passing.
+
 ### Key decision: 1926 data source
 
 **Decided: US, "American Stories" dataset on Hugging Face**
@@ -142,15 +172,17 @@ tools: pytest, ruff, mypy. Ask before adding any dependency not listed here or i
 echoledger/
 ├── CLAUDE.md / PROGRESS.md / README.md
 ├── pyproject.toml / .gitignore / .env.example / .env (gitignored, has real API keys)
-├── Dockerfile / .dockerignore / .github/workflows/ci.yml
+├── Dockerfile / .dockerignore / .github/workflows/ci.yml / .github/workflows/eval.yml
 ├── src/echoledger/
 │   ├── config.py  models.py  cli.py
-│   ├── storage/   (db.py)
-│   ├── sources/   (american_stories.py, rss.py)
-│   ├── utils/     (dates.py)
-│   ├── llm/       (client.py, arthur.py, news_summary.py)
-│   ├── api/       (app.py, views.py, schemas.py)
-│   └── rag/       (embeddings.py, vector_store.py, index.py, echo.py)
+│   ├── storage/      (db.py)
+│   ├── sources/      (american_stories.py, rss.py)
+│   ├── utils/        (dates.py)
+│   ├── llm/          (client.py, arthur.py, news_summary.py, predictions.py)
+│   ├── api/          (app.py, views.py, schemas.py)
+│   ├── rag/          (embeddings.py, vector_store.py, index.py, echo.py)
+│   ├── evals/        (brier.py, leakage_judge.py)
+│   └── guardrails/   (injection.py, copyright.py)
 ├── tests/
 └── data/              # gitignored — downloaded datasets, SQLite db, data/chroma/ vector store
 ```
