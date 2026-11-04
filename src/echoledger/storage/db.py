@@ -11,7 +11,13 @@ import os
 import sqlite3
 from datetime import date, datetime
 
-from echoledger.models import ArthurDiaryEntry, HistoricalArticle, NewsSummary, TodayHeadline
+from echoledger.models import (
+    ArthurDiaryEntry,
+    EchoCandidate,
+    HistoricalArticle,
+    NewsSummary,
+    TodayHeadline,
+)
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS historical_articles (
@@ -54,6 +60,15 @@ CREATE TABLE IF NOT EXISTS news_summaries (
     date TEXT NOT NULL,
     summary_text TEXT NOT NULL,
     model TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS echo_candidates (
+    today_headline_id TEXT PRIMARY KEY,
+    date TEXT NOT NULL,
+    historical_article_id TEXT NOT NULL,
+    historical_headline TEXT NOT NULL,
+    historical_date TEXT NOT NULL,
+    distance REAL NOT NULL
 );
 
 -- Non-negotiable cost-control rule: log tokens + cost for every LLM call.
@@ -232,6 +247,44 @@ def get_news_summaries(conn: sqlite3.Connection, on_date: date) -> list[NewsSumm
             date=date.fromisoformat(row["date"]),
             summary_text=row["summary_text"],
             model=row["model"],
+        )
+        for row in rows
+    ]
+
+
+def save_echo_candidate(conn: sqlite3.Connection, candidate: EchoCandidate) -> None:
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO echo_candidates
+            (today_headline_id, date, historical_article_id, historical_headline,
+             historical_date, distance)
+        VALUES (:today_headline_id, :date, :historical_article_id, :historical_headline,
+                :historical_date, :distance)
+        """,
+        {
+            "today_headline_id": candidate.today_headline_id,
+            "date": candidate.date.isoformat(),
+            "historical_article_id": candidate.historical_article_id,
+            "historical_headline": candidate.historical_headline,
+            "historical_date": candidate.historical_date.isoformat(),
+            "distance": candidate.distance,
+        },
+    )
+    conn.commit()
+
+
+def get_echo_candidates(conn: sqlite3.Connection, on_date: date) -> list[EchoCandidate]:
+    rows = conn.execute(
+        "SELECT * FROM echo_candidates WHERE date = ?", (on_date.isoformat(),)
+    ).fetchall()
+    return [
+        EchoCandidate(
+            today_headline_id=row["today_headline_id"],
+            date=date.fromisoformat(row["date"]),
+            historical_article_id=row["historical_article_id"],
+            historical_headline=row["historical_headline"],
+            historical_date=date.fromisoformat(row["historical_date"]),
+            distance=row["distance"],
         )
         for row in rows
     ]

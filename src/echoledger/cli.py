@@ -9,13 +9,17 @@ from echoledger.api.views import build_daily_view
 from echoledger.config import DB_PATH, LLM_MODEL, NEWSPAPER_KEY, RAW_DIR
 from echoledger.llm.arthur import write_diary_entry
 from echoledger.llm.news_summary import summarize_headlines
+from echoledger.rag.echo import find_echo_candidates
+from echoledger.rag.index import index_historical_articles, index_today_headlines
 from echoledger.sources.american_stories import ingest_year
 from echoledger.sources.rss import FEEDS, fetch_headlines
 from echoledger.storage.db import (
     connect,
     get_diary_entry,
+    get_echo_candidates,
     get_historical_articles,
     get_news_summaries,
+    save_echo_candidate,
     save_today_headline,
 )
 from echoledger.utils.dates import today as today_fn
@@ -74,6 +78,25 @@ def cmd_fetch(args: argparse.Namespace) -> None:
     else:
         print("  All of today's headlines already summarized - skipping.")
 
+    # Index for retrieval, then find History Echo matches - both idempotent,
+    # so re-running fetch never re-embeds or re-queries unchanged data.
+    indexed_historical = index_historical_articles(conn, historical_articles)
+    indexed_today = index_today_headlines(conn, all_headlines)
+    if indexed_historical or indexed_today:
+        print(f"  Indexed {indexed_historical} historical + {indexed_today} today text(s).")
+
+    already_echoed = {c.today_headline_id for c in get_echo_candidates(conn, on_date)}
+    headlines_needing_echo = [h for h in all_headlines if h.id not in already_echoed]
+    if headlines_needing_echo:
+        new_candidates = find_echo_candidates(
+            conn, headlines_needing_echo, max_historical_date=historical_date
+        )
+        for candidate in new_candidates:
+            save_echo_candidate(conn, candidate)
+        print(f"  Found {len(new_candidates)} new History Echo match(es).")
+    else:
+        print("  All of today's headlines already have echo matches - skipping.")
+
     conn.close()
     print(
         f"Done. {len(historical_articles)} historical, "
@@ -104,6 +127,11 @@ def cmd_show(args: argparse.Namespace) -> None:
             print(f"  [{item.source_name}] {item.headline}")
             print(f"    {item.summary}")
             print(f"    {item.url}")
+            if item.echo is not None:
+                print(
+                    f"    Echo [{item.echo.historical_date}]: "
+                    f"{item.echo.historical_headline.strip() or '(no headline)'}"
+                )
 
 
 def build_parser() -> argparse.ArgumentParser:

@@ -60,3 +60,20 @@ class NewsSummary(BaseModel):
     date: date
     summary_text: str
     model: str
+
+
+class EchoCandidate(BaseModel):
+    """The most similar 1926 article found for one TodayHeadline, by
+    embedding similarity - time-filtered so it can never be dated after
+    Arthur's own historical date. Persisted (not recomputed on every read)
+    so `show`/the API never silently re-call the embeddings API."""
+
+    today_headline_id: str
+    historical_article_id: str
+    historical_headline: str
+    # historical_date must come before `date` - once a field named `date`
+    # is declared, it shadows the `date` *type* for every later line in
+    # this class body (same gotcha hit in api/schemas.py's DailyView).
+    historical_date: date
+    date: date
+    distance: float

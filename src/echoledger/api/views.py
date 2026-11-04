@@ -10,9 +10,10 @@ from __future__ import annotations
 import sqlite3
 from datetime import date
 
-from echoledger.api.schemas import DailyView, NewsItemView
+from echoledger.api.schemas import DailyView, EchoView, NewsItemView
 from echoledger.storage.db import (
     get_diary_entry,
+    get_echo_candidates,
     get_historical_articles,
     get_news_summaries,
     get_today_headlines,
@@ -30,18 +31,30 @@ def build_daily_view(conn: sqlite3.Connection, on_date: date) -> DailyView:
 
     headlines = get_today_headlines(conn, on_date)
     summaries_by_id = {s.headline_id: s for s in get_news_summaries(conn, on_date)}
+    echoes_by_id = {c.today_headline_id: c for c in get_echo_candidates(conn, on_date)}
 
-    news = [
-        NewsItemView(
-            source_name=h.source_name,
-            headline=h.headline,
-            summary=(
-                summaries_by_id[h.id].summary_text if h.id in summaries_by_id else h.snippet
-            ),
-            url=h.url,
+    news = []
+    for h in headlines:
+        echo = echoes_by_id.get(h.id)
+        news.append(
+            NewsItemView(
+                source_name=h.source_name,
+                headline=h.headline,
+                summary=(
+                    summaries_by_id[h.id].summary_text if h.id in summaries_by_id else h.snippet
+                ),
+                url=h.url,
+                echo=(
+                    EchoView(
+                        historical_headline=echo.historical_headline,
+                        historical_date=echo.historical_date,
+                        distance=echo.distance,
+                    )
+                    if echo
+                    else None
+                ),
+            )
         )
-        for h in headlines
-    ]
 
     return DailyView(
         date=on_date,

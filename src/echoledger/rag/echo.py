@@ -10,20 +10,10 @@ from datetime import date
 
 from chromadb.api.models.Collection import Collection
 from openai import OpenAI
-from pydantic import BaseModel
 
-from echoledger.models import TodayHeadline
+from echoledger.models import EchoCandidate, TodayHeadline
 from echoledger.rag.embeddings import embed_texts
 from echoledger.rag.vector_store import get_collection
-
-
-class EchoCandidate(BaseModel):
-    today_headline_id: str
-    today_headline_text: str
-    historical_article_id: str
-    historical_headline: str
-    historical_date: date
-    distance: float
 
 
 def find_echo_candidates(
@@ -72,7 +62,7 @@ def find_echo_candidates(
         candidates.append(
             EchoCandidate(
                 today_headline_id=headline.id,
-                today_headline_text=headline.headline,
+                date=headline.date,
                 historical_article_id=matched_ids[0],
                 historical_headline=results["documents"][i][0],
                 historical_date=date.fromisoformat(historical_date_str),

@@ -9,11 +9,18 @@ from datetime import date
 from pydantic import BaseModel
 
 
+class EchoView(BaseModel):
+    historical_headline: str
+    historical_date: date
+    distance: float
+
+
 class NewsItemView(BaseModel):
     source_name: str
     headline: str
     summary: str
     url: str
+    echo: EchoView | None = None
 
 
 class DailyView(BaseModel):
