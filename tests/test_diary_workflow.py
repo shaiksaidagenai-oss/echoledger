@@ -10,30 +10,31 @@ from echoledger.storage.db import connect, get_diary_entry
 
 
 class _FakeMessages:
-    def __init__(self, entry_text: str, verdict: str, violations: list[str]) -> None:
-        self._entry_response = SimpleNamespace(
-            parsed_output=SimpleNamespace(entry_text=entry_text),
-            usage=SimpleNamespace(input_tokens=100, output_tokens=50),
-        )
-        self._judge_response = SimpleNamespace(
-            parsed_output=SimpleNamespace(verdict=verdict, violations=[]),
-            usage=SimpleNamespace(input_tokens=100, output_tokens=50),
-        )
-        self._violations = violations
+    """Returns the next entry text in sequence each time `write` is
+    called, like a real model would produce a different draft each
+    regeneration - and a fixed judge verdict every time."""
+
+    def __init__(self, entry_texts: list[str], verdict: str = "pass") -> None:
+        self._entry_texts = iter(entry_texts)
+        self._verdict = verdict
 
     def parse(self, **kwargs: object) -> SimpleNamespace:
         system = kwargs.get("system", "")
         assert isinstance(system, str)
         if "fact-checker" in system:
-            return self._judge_response
-        return self._entry_response
+            return SimpleNamespace(
+                parsed_output=SimpleNamespace(verdict=self._verdict, violations=[]),
+                usage=SimpleNamespace(input_tokens=100, output_tokens=50),
+            )
+        return SimpleNamespace(
+            parsed_output=SimpleNamespace(entry_text=next(self._entry_texts)),
+            usage=SimpleNamespace(input_tokens=100, output_tokens=50),
+        )
 
 
 class _FakeClient:
-    def __init__(
-        self, entry_text: str, verdict: str = "pass", violations: list[str] | None = None
-    ) -> None:
-        self.messages = _FakeMessages(entry_text, verdict, violations or [])
+    def __init__(self, entry_texts: list[str], verdict: str = "pass") -> None:
+        self.messages = _FakeMessages(entry_texts, verdict)
 
 
 @pytest.fixture
@@ -43,36 +44,101 @@ def conn() -> sqlite3.Connection:
 
 def _article() -> HistoricalArticle:
     return HistoricalArticle(
-        id="a1", date=date(1926, 10, 29), newspaper="Evening Star", page=1,
-        headline="A headline", text="Article text",
+        id="a1",
+        date=date(1926, 10, 29),
+        newspaper="Evening Star",
+        page=1,
+        headline="A headline",
+        text="Article text",
     )
 
 
-def test_run_diary_workflow_approved(conn: sqlite3.Connection) -> None:
-    fake_client = _FakeClient("A clean entry.")
+def test_run_diary_workflow_approved_first_attempt(conn: sqlite3.Connection) -> None:
+    fake_client = _FakeClient(["A clean entry."])
 
-    def _approve_everything(entry_text: str, verdict: str | None, violations: list[str]) -> bool:
-        return True
+    def _approve(
+        entry_text: str, verdict: str | None, violations: list[str], attempt: int, max_attempts: int
+    ) -> str:
+        return "approve"
 
     entry = run_diary_workflow(
-        conn, date(1926, 10, 29), [_article()], model="claude-haiku-4-5",
-        get_approval=_approve_everything, client=fake_client,  # type: ignore[arg-type]
+        conn,
+        date(1926, 10, 29),
+        [_article()],
+        model="claude-haiku-4-5",
+        get_approval=_approve,
+        client=fake_client,  # type: ignore[arg-type]
     )
 
     assert entry.approved is True
+    assert entry.entry_text == "A clean entry."
     assert get_diary_entry(conn, date(1926, 10, 29)).approved is True  # type: ignore[union-attr]
 
 
-def test_run_diary_workflow_rejected(conn: sqlite3.Connection) -> None:
-    fake_client = _FakeClient("A questionable entry.")
+def test_run_diary_workflow_rejected_without_regenerating(conn: sqlite3.Connection) -> None:
+    fake_client = _FakeClient(["A questionable entry."])
 
-    def _reject_everything(entry_text: str, verdict: str | None, violations: list[str]) -> bool:
-        return False
+    def _reject(
+        entry_text: str, verdict: str | None, violations: list[str], attempt: int, max_attempts: int
+    ) -> str:
+        return "reject"
 
     entry = run_diary_workflow(
-        conn, date(1926, 10, 29), [_article()], model="claude-haiku-4-5",
-        get_approval=_reject_everything, client=fake_client,  # type: ignore[arg-type]
+        conn,
+        date(1926, 10, 29),
+        [_article()],
+        model="claude-haiku-4-5",
+        get_approval=_reject,
+        client=fake_client,  # type: ignore[arg-type]
     )
 
     assert entry.approved is False
     assert get_diary_entry(conn, date(1926, 10, 29)).approved is False  # type: ignore[union-attr]
+
+
+def test_run_diary_workflow_regenerates_then_approves(conn: sqlite3.Connection) -> None:
+    fake_client = _FakeClient(["First flawed draft.", "Second, better draft."])
+    calls: list[int] = []
+
+    def _regenerate_once_then_approve(
+        entry_text: str, verdict: str | None, violations: list[str], attempt: int, max_attempts: int
+    ) -> str:
+        calls.append(attempt)
+        return "regenerate" if attempt == 1 else "approve"
+
+    entry = run_diary_workflow(
+        conn,
+        date(1926, 10, 29),
+        [_article()],
+        model="claude-haiku-4-5",
+        get_approval=_regenerate_once_then_approve,
+        client=fake_client,  # type: ignore[arg-type]
+    )
+
+    assert calls == [1, 2]  # the approval callback was genuinely invoked twice
+    assert entry.approved is True
+    assert entry.entry_text == "Second, better draft."  # the final, regenerated text
+
+
+def test_run_diary_workflow_stops_regenerating_at_max_attempts(conn: sqlite3.Connection) -> None:
+    fake_client = _FakeClient(["Draft one.", "Draft two."], verdict="fail")
+    calls: list[int] = []
+
+    def _always_try_to_regenerate(
+        entry_text: str, verdict: str | None, violations: list[str], attempt: int, max_attempts: int
+    ) -> str:
+        calls.append(attempt)
+        return "regenerate"
+
+    entry = run_diary_workflow(
+        conn,
+        date(1926, 10, 29),
+        [_article()],
+        model="claude-haiku-4-5",
+        get_approval=_always_try_to_regenerate,
+        client=fake_client,  # type: ignore[arg-type]
+        max_attempts=2,
+    )
+
+    assert calls == [1, 2]  # stopped asking once max_attempts was reached
+    assert entry.approved is False  # "regenerate" past the limit finalizes as rejected

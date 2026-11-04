@@ -41,21 +41,39 @@ def _parse_date(value: str) -> date:
         ) from exc
 
 
-def _ask_for_diary_approval(entry_text: str, verdict: str | None, violations: list[str]) -> bool:
+def _ask_for_diary_approval(
+    entry_text: str, verdict: str | None, violations: list[str], attempt: int, max_attempts: int
+) -> str:
     """The real human-in-the-loop step: Arthur's draft is shown right here
-    in the terminal, and `fetch` genuinely pauses until you answer."""
-    print("\n  === Draft diary entry, awaiting your approval ===")
+    in the terminal, and `fetch` genuinely pauses until you answer.
+
+    A rejection doesn't have to be final - this is the highest-leakage-risk
+    content in the project, so "approve a flawed entry or lose the day
+    entirely" was too narrow a choice. Offers a real third option:
+    regenerate a fresh draft (up to max_attempts total)."""
+    print(
+        f"\n  === Draft diary entry (attempt {attempt}/{max_attempts}), "
+        "awaiting your approval ==="
+    )
     print(entry_text)
     print(f"\n  Leakage judge verdict: {verdict}")
     if violations:
         print("  Violations flagged:")
         for violation in violations:
             print(f"    - {violation}")
+
+    can_regenerate = attempt < max_attempts
+    options = "[y]es / [n]o" + (" / [r]egenerate" if can_regenerate else "")
     # .strip("﻿...") also strips a leading BOM - some shells (PowerShell's
     # `"y" | command` in particular) prepend one when piping text to stdin,
     # which plain .strip() leaves behind since it isn't whitespace.
-    answer = input("\n  Approve this entry? [y/n]: ").strip("﻿ \t\r\n").lower()
-    return answer == "y"
+    answer = input(f"\n  Approve this entry? {options}: ").strip("﻿ \t\r\n").lower()
+
+    if answer == "y":
+        return "approve"
+    if answer == "r" and can_regenerate:
+        return "regenerate"
+    return "reject"
 
 
 def cmd_fetch(args: argparse.Namespace) -> None:
