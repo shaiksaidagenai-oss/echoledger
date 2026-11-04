@@ -55,3 +55,12 @@ def test_get_today_returns_200(client: TestClient) -> None:
 
     assert response.status_code == 200
     assert "date" in response.json()
+
+
+def test_get_scorecard_returns_200(client: TestClient) -> None:
+    response = client.get("/scorecard")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["brier_score"] is None  # nothing resolved in this fresh test DB
+    assert body["resolved"] == []

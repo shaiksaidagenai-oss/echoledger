@@ -23,6 +23,12 @@ class NewsItemView(BaseModel):
     echo: EchoView | None = None
 
 
+class PredictionView(BaseModel):
+    statement: str
+    probability: float
+    resolution_date: date
+
+
 class DailyView(BaseModel):
     # historical_date must come before `date` - once a field named `date` is
     # declared, it shadows the `date` *type* for every later line in this
@@ -32,3 +38,16 @@ class DailyView(BaseModel):
     historical_newspaper: str | None
     diary_entry: str | None
     news: list[NewsItemView]
+    predictions: list[PredictionView]
+
+
+class ResolvedPredictionView(BaseModel):
+    statement: str
+    probability: float
+    outcome: str
+    reasoning: str
+
+
+class ScorecardView(BaseModel):
+    brier_score: float | None
+    resolved: list[ResolvedPredictionView]

@@ -10,12 +10,22 @@ from __future__ import annotations
 import sqlite3
 from datetime import date
 
-from echoledger.api.schemas import DailyView, EchoView, NewsItemView
+from echoledger.api.schemas import (
+    DailyView,
+    EchoView,
+    NewsItemView,
+    PredictionView,
+    ResolvedPredictionView,
+    ScorecardView,
+)
+from echoledger.evals.brier import brier_score
 from echoledger.storage.db import (
     get_diary_entry,
     get_echo_candidates,
     get_historical_articles,
     get_news_summaries,
+    get_predictions_created_on,
+    get_resolved_predictions,
     get_today_headlines,
 )
 from echoledger.utils.dates import years_ago
@@ -56,10 +66,36 @@ def build_daily_view(conn: sqlite3.Connection, on_date: date) -> DailyView:
             )
         )
 
+    predictions = [
+        PredictionView(
+            statement=p.statement,
+            probability=p.probability,
+            resolution_date=p.resolution_date,
+        )
+        for p in get_predictions_created_on(conn, on_date)
+    ]
+
     return DailyView(
         date=on_date,
         historical_date=historical_date,
         historical_newspaper=historical_newspaper,
         diary_entry=diary.entry_text if diary else None,
         news=news,
+        predictions=predictions,
+    )
+
+
+def build_scorecard_view(conn: sqlite3.Connection) -> ScorecardView:
+    resolved = get_resolved_predictions(conn)
+    return ScorecardView(
+        brier_score=brier_score(resolved),
+        resolved=[
+            ResolvedPredictionView(
+                statement=prediction.statement,
+                probability=prediction.probability,
+                outcome=resolution.outcome,
+                reasoning=resolution.reasoning,
+            )
+            for prediction, resolution in resolved
+        ],
     )

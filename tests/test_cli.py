@@ -2,7 +2,7 @@ from datetime import date
 
 import pytest
 
-from echoledger.cli import build_parser, cmd_fetch, cmd_show
+from echoledger.cli import build_parser, cmd_fetch, cmd_scorecard, cmd_show
 
 
 def test_parse_date_accepts_iso_format() -> None:
@@ -28,6 +28,12 @@ def test_show_command_wires_to_cmd_show() -> None:
     args = parser.parse_args(["show"])
     assert args.func is cmd_show
     assert args.date is None  # defaults to today when not given
+
+
+def test_scorecard_command_wires_to_cmd_scorecard() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["scorecard"])
+    assert args.func is cmd_scorecard
 
 
 def test_a_command_is_required() -> None:
