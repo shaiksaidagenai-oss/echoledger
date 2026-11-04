@@ -68,6 +68,29 @@ RSS headlines get paraphrased summaries; both served read-only over HTTP.
 was pasted into chat by mistake. Treated as compromised immediately, revoked, and rotated before
 any use - **never paste a secret into the conversation; put it directly in `.env` instead.**
 
+## Phase 3 — embeddings + vector search + History Echo: DONE (2026-11-04)
+
+Target deliverable: 1926 articles + today's headlines embedded into a vector store;
+time-filtered similarity search; History Echo matches found and surfaced via `show`/the API.
+
+**Status:** done, verified against the full real archive + live headlines, not just unit tests.
+- **Embeddings:** OpenAI `text-embedding-3-small` (`OPENAI_API_KEY` in `.env`, $0.02/1M tokens).
+  Did NOT use LlamaIndex despite it being named in the original roadmap - hand-rolled with OpenAI
+  + Chroma directly, same reasoning as skipping LangChain: no framework needed yet.
+- **`rag/vector_store.py`:** Chroma, persists to `data/chroma/` (gitignored).
+- **`rag/index.py`:** idempotent embedding of HistoricalArticles/TodayHeadlines - skips anything
+  already indexed by ID, never re-pays OpenAI for the same text twice.
+- **`rag/echo.py`:** `find_echo_candidates()` - time-filtered (`date_int <= max_historical_date`)
+  so a match can never be dated after Arthur's own historical date. Results persisted
+  (`echo_candidates` table), not recomputed on every read.
+- **Empirically verified, not assumed:** Chroma's `$lte`/`$gte` require numeric values, not date
+  strings (found via a real runtime error - fixed with an integer `date_int` field).
+- Real result worth remembering: "Florida Republicans fend off Democrats... first black
+  governor" (2026) matched by pure embedding similarity to "DEMOCRATIC GAINS SEEN IN CONGRESS...
+  G.O.P. Is Bankrupt Mentally and Morally" (1926) - a genuine midterm-election echo across
+  exactly 100 years.
+- 52 tests, all passing without touching the real vector store or making real API calls.
+
 ### Key decision: 1926 data source
 
 **Decided: US, "American Stories" dataset on Hugging Face**
@@ -100,24 +123,25 @@ API, and NOT an India-based source. Reasoning, for future reference:
 ### Open items (not yet decided)
 
 - Newspaper (Evening Star) and RSS feeds (BBC/Guardian/NPR) are resolved — see above.
-- 1926-article selection for Arthur is currently "first 6 front-page articles" — not smart
-  matching to today's top story. That's the **History Echo** feature (Phase 3+, needs
-  embeddings) — do not build that logic prematurely.
+- Arthur's own diary still picks "first 6 front-page articles," not a RAG-retrieved relevant
+  set - the embeddings/retrieval built in Phase 3 currently only power History Echo matching,
+  not Arthur's own article selection. Could be revisited but isn't required.
 - An automated **leakage judge** (scoring whether Arthur's entries actually avoid anachronisms,
   beyond just the prompt instruction) is Phase 4, not built yet.
+- No hybrid retrieval (keyword + semantic) - History Echo is pure embedding similarity.
 
 ## Tech stack
 
 Python 3.11+ (3.13.1 installed), venv named `EchoLedger/` (gitignored). Dependencies: pydantic,
-httpx, python-dotenv, tzdata (Windows only), anthropic, fastapi, uvicorn. Dev tools: pytest,
-ruff, mypy. Ask before adding any dependency not listed here or in `pyproject.toml`.
+httpx, python-dotenv, tzdata (Windows only), anthropic, fastapi, uvicorn, openai, chromadb. Dev
+tools: pytest, ruff, mypy. Ask before adding any dependency not listed here or in `pyproject.toml`.
 
 ## Repo structure (current)
 
 ```
 echoledger/
 ├── CLAUDE.md / PROGRESS.md / README.md
-├── pyproject.toml / .gitignore / .env.example / .env (gitignored, has the real API key)
+├── pyproject.toml / .gitignore / .env.example / .env (gitignored, has real API keys)
 ├── Dockerfile / .dockerignore / .github/workflows/ci.yml
 ├── src/echoledger/
 │   ├── config.py  models.py  cli.py
@@ -125,9 +149,10 @@ echoledger/
 │   ├── sources/   (american_stories.py, rss.py)
 │   ├── utils/     (dates.py)
 │   ├── llm/       (client.py, arthur.py, news_summary.py)
-│   └── api/       (app.py, views.py, schemas.py)
+│   ├── api/       (app.py, views.py, schemas.py)
+│   └── rag/       (embeddings.py, vector_store.py, index.py, echo.py)
 ├── tests/
-└── data/              # gitignored — downloaded datasets, SQLite db
+└── data/              # gitignored — downloaded datasets, SQLite db, data/chroma/ vector store
 ```
 
 ## Windows/PowerShell gotcha

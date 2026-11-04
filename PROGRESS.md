@@ -1,5 +1,43 @@
 # Progress Log
 
+## Session 4 — 2026-11-04 (Phase 3)
+
+**Phase 3 complete: embeddings + Chroma vector search + History Echo, end-to-end.**
+
+- Chose OpenAI `text-embedding-3-small` ($0.02/1M tokens) as the embeddings provider -
+  `OPENAI_API_KEY` added to `.env`. Deliberately did NOT use LlamaIndex (named in the original
+  roadmap) - hand-rolled the same functionality directly with OpenAI + Chroma, same reasoning as
+  skipping LangChain earlier: thin, readable, no framework needed yet.
+- `rag/embeddings.py`, `rag/vector_store.py` (Chroma, persists to `data/chroma/`), `rag/index.py`
+  (idempotent embedding of HistoricalArticles/TodayHeadlines), `rag/echo.py` (time-filtered
+  similarity search - a match can never be dated after Arthur's own historical date).
+- **Verified Chroma's actual filter behavior empirically rather than assumed:** `$lte`/`$gte`
+  require numeric values, not date strings (found via a real runtime error) - fixed with an
+  integer `date_int` metadata field. The `$and` + bare-equality shorthand *does* work at runtime
+  despite chromadb's type stubs being stricter than the real API (documented with targeted
+  `type: ignore`, not blanket-suppressed).
+- Hit the exact same field-shadowing mypy bug a third time (`EchoCandidate.date` before
+  `historical_date`) - now documented in two places in the code.
+- **Learned the Phase 2 lesson and applied it proactively this time:** built the RAG functions,
+  then immediately asked "should I wire this into fetch/show/API now" instead of waiting to be
+  caught. Wired `find_echo_candidates` to persist results (`echo_candidates` table) rather than
+  recompute on every read - the same "cache everything, compute once" pattern as the diary entry.
+- Verified for real against the full archive + live headlines: genuine thematic echoes found by
+  embedding similarity alone, including a strong real midterm-election match - "Florida
+  Republicans fend off Democrats... first black governor" (2026) matched to "DEMOCRATIC GAINS
+  SEEN IN CONGRESS... G.O.P. Is Bankrupt Mentally and Morally" (1926) - landing on genuine
+  Election Day 2026 news. Total embedding cost so far: under $0.01.
+- 52 tests total, all green.
+
+**Known gaps, stated plainly:**
+- A few echo matches show "(no headline)" - some 1926 articles have no legible headline from the
+  Phase 1 parser, but the body text still matched correctly. Cosmetic, not a correctness bug.
+- No hybrid retrieval (keyword + semantic combined) - pure embedding similarity only.
+- Running `fetch --date X` on a real calendar day other than X mislabels *current* RSS headlines
+  under the wrong logical date, since RSS has no way to fetch "yesterday's top stories" - only
+  "what's current right now." Not a bug, just means `fetch` should only ever be run with
+  `--date today` in real daily use, never backfilled for the "today" side.
+
 ## Session 3 — 2026-10-30 (Phase 2)
 
 **Phase 2 complete: Arthur writes, news gets summarized, both served over HTTP.**
