@@ -34,13 +34,15 @@ def conn() -> sqlite3.Connection:
     return connect(":memory:")
 
 
-def _headline(headline_id: str, text: str) -> TodayHeadline:
+def _headline(
+    headline_id: str, text: str, snippet: str = "Some RSS snippet text."
+) -> TodayHeadline:
     return TodayHeadline(
         id=headline_id,
         date=date(2026, 10, 30),
         source_name="BBC News",
         headline=text,
-        snippet="Some RSS snippet text.",
+        snippet=snippet,
         url=f"https://example.com/{headline_id}",
         fetched_at=datetime(2026, 10, 30, 9, 0, 0),
     )
@@ -91,3 +93,20 @@ def test_summarize_headlines_with_no_headlines_makes_no_api_call(conn: sqlite3.C
     )
 
     assert result == []
+
+
+def test_summarize_headlines_rejects_a_summary_that_just_copies_the_snippet(
+    conn: sqlite3.Connection,
+) -> None:
+    snippet = "The city council voted unanimously to approve the new downtown parking plan today."
+    headlines = [_headline("h1", "Parking plan approved", snippet=snippet)]
+    fake_client = _FakeClient(
+        items=[{"headline_id": "h1", "summary_text": snippet}]  # verbatim copy, not a paraphrase
+    )
+
+    summaries = summarize_headlines(
+        conn, date(2026, 10, 30), headlines, model="claude-haiku-4-5", client=fake_client  # type: ignore[arg-type]
+    )
+
+    assert summaries == []
+    assert get_news_summaries(conn, date(2026, 10, 30)) == []

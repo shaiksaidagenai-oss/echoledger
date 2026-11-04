@@ -9,6 +9,7 @@ from echoledger.api.views import build_daily_view
 from echoledger.config import DB_PATH, LLM_MODEL, NEWSPAPER_KEY, RAW_DIR
 from echoledger.evals.brier import brier_score
 from echoledger.evals.leakage_judge import judge_diary_entry
+from echoledger.guardrails.injection import detect_injection_markers
 from echoledger.llm.arthur import write_diary_entry
 from echoledger.llm.news_summary import summarize_headlines
 from echoledger.llm.predictions import generate_predictions, resolve_predictions
@@ -65,6 +66,9 @@ def cmd_fetch(args: argparse.Namespace) -> None:
         headlines = fetch_headlines(url, source_name=source_name, on_date=on_date, limit=3)
         for headline in headlines:
             save_today_headline(conn, headline)
+            markers = detect_injection_markers(f"{headline.headline} {headline.snippet}")
+            if markers:
+                print(f"  [guardrail] Possible injection text in headline {headline.id}: {markers}")
         all_headlines.extend(headlines)
         print(f"  Fetched {len(headlines)} headline(s) from {source_name}.")
 
