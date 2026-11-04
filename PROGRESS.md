@@ -1,5 +1,35 @@
 # Progress Log
 
+## Session 5, continued — Leakage judge (Phase 4, part 2 of ~3)
+
+**Built, wired in, and verified for real - with one genuine, honestly-documented false positive.**
+
+- `evals/leakage_judge.py`: `judge_diary_entry()`, a SEPARATE Claude call reviewing a completed
+  diary entry for anachronisms. Deliberately the opposite instruction from Arthur's own
+  generation: the judge is SUPPOSED to use its full historical knowledge - that's how it
+  recognizes a violation.
+- Wired into `fetch` (judges only newly-generated entries, not on every re-run) and `show`
+  (displays a loud warning if flagged, so nothing is silently hidden even without a hard
+  publish-block).
+- **Real test with a deliberately leaky planted entry:** fed the real judge an entry mentioning
+  the 1929 crash, Houdini's death stated as certain fact, television, and WWII starting in 1939.
+  It correctly caught all 4, with accurate explanations - including correctly distinguishing
+  Arthur's real, properly-hedged "physicians hold little hope" from this test's improperly
+  definite "he will die this very week."
+- **Real test against the actual existing diary entries** (Oct 29, 30, Nov 4 - generated before
+  this feature existed) turned up a genuine **false positive**: the judge flagged Oct 29's
+  Professor Hussey passage as suspicious, but that death was real 1926 news (verified earlier
+  this session, straight from that day's actual Evening Star) - the judge's reasoning got
+  confused by biographical detail that was likely in the real source article. **Root cause: the
+  judge only sees Arthur's finished text, never the original source articles, so it can't verify
+  "this detail came from the real newspaper" vs. "this sounds suspiciously specific."** Left the
+  judgment as-is in the database (honest data, not hidden) rather than deleting an inconvenient
+  result - documenting the limitation here instead.
+- **Known limitation to revisit:** giving the judge the source articles alongside the diary
+  entry (so it can check grounding, not just plausibility) would likely fix this false-positive
+  class. Not built now - flagging for later, not silently working around it.
+- 78 tests total, all green.
+
 ## Session 5 — 2026-11-04 (Phase 4, part 1 of ~3)
 
 **Prediction Ledger complete and verified for real. Leakage judge, broader guardrails, and the
