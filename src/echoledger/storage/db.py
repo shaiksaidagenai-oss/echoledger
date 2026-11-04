@@ -16,6 +16,8 @@ from echoledger.models import (
     EchoCandidate,
     HistoricalArticle,
     NewsSummary,
+    Prediction,
+    PredictionResolution,
     TodayHeadline,
 )
 
@@ -69,6 +71,26 @@ CREATE TABLE IF NOT EXISTS echo_candidates (
     historical_headline TEXT NOT NULL,
     historical_date TEXT NOT NULL,
     distance REAL NOT NULL
+);
+
+-- Honesty rule: predictions are immutable/append-only once logged. No code
+-- in this file ever UPDATEs a row here - only INSERTs. Resolution is a
+-- separate table (below), never an edit to this one.
+CREATE TABLE IF NOT EXISTS predictions (
+    id TEXT PRIMARY KEY,
+    created_date TEXT NOT NULL,
+    resolution_date TEXT NOT NULL,
+    statement TEXT NOT NULL,
+    probability REAL NOT NULL,
+    forecaster TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS prediction_resolutions (
+    prediction_id TEXT PRIMARY KEY,
+    resolved_at TEXT NOT NULL,
+    outcome TEXT NOT NULL,
+    reasoning TEXT NOT NULL,
+    resolver TEXT NOT NULL
 );
 
 -- Non-negotiable cost-control rule: log tokens + cost for every LLM call.
@@ -288,6 +310,120 @@ def get_echo_candidates(conn: sqlite3.Connection, on_date: date) -> list[EchoCan
         )
         for row in rows
     ]
+
+
+def save_prediction(conn: sqlite3.Connection, prediction: Prediction) -> None:
+    """Plain INSERT, not INSERT OR REPLACE: saving the same id twice must
+    fail loudly (sqlite3.IntegrityError), not silently overwrite - that's
+    the honesty rule (predictions are immutable) enforced at the DB level,
+    not just by convention."""
+    conn.execute(
+        """
+        INSERT INTO predictions
+            (id, created_date, resolution_date, statement, probability, forecaster)
+        VALUES (:id, :created_date, :resolution_date, :statement, :probability, :forecaster)
+        """,
+        {
+            "id": prediction.id,
+            "created_date": prediction.created_date.isoformat(),
+            "resolution_date": prediction.resolution_date.isoformat(),
+            "statement": prediction.statement,
+            "probability": prediction.probability,
+            "forecaster": prediction.forecaster,
+        },
+    )
+    conn.commit()
+
+
+def _prediction_from_row(row: sqlite3.Row) -> Prediction:
+    return Prediction(
+        id=row["id"],
+        created_date=date.fromisoformat(row["created_date"]),
+        resolution_date=date.fromisoformat(row["resolution_date"]),
+        statement=row["statement"],
+        probability=row["probability"],
+        forecaster=row["forecaster"],
+    )
+
+
+def get_predictions_created_on(conn: sqlite3.Connection, on_date: date) -> list[Prediction]:
+    rows = conn.execute(
+        "SELECT * FROM predictions WHERE created_date = ?", (on_date.isoformat(),)
+    ).fetchall()
+    return [_prediction_from_row(row) for row in rows]
+
+
+def get_pending_predictions(conn: sqlite3.Connection, as_of_date: date) -> list[Prediction]:
+    """Predictions due to be resolved (resolution_date <= as_of_date) that
+    don't have a resolution row yet."""
+    rows = conn.execute(
+        """
+        SELECT p.* FROM predictions p
+        LEFT JOIN prediction_resolutions r ON p.id = r.prediction_id
+        WHERE p.resolution_date <= ? AND r.prediction_id IS NULL
+        """,
+        (as_of_date.isoformat(),),
+    ).fetchall()
+    return [_prediction_from_row(row) for row in rows]
+
+
+def save_resolution(conn: sqlite3.Connection, resolution: PredictionResolution) -> None:
+    """Also a plain INSERT - a prediction can only ever be resolved once."""
+    conn.execute(
+        """
+        INSERT INTO prediction_resolutions
+            (prediction_id, resolved_at, outcome, reasoning, resolver)
+        VALUES (:prediction_id, :resolved_at, :outcome, :reasoning, :resolver)
+        """,
+        {
+            "prediction_id": resolution.prediction_id,
+            "resolved_at": resolution.resolved_at.isoformat(),
+            "outcome": resolution.outcome,
+            "reasoning": resolution.reasoning,
+            "resolver": resolution.resolver,
+        },
+    )
+    conn.commit()
+
+
+def get_resolution(conn: sqlite3.Connection, prediction_id: str) -> PredictionResolution | None:
+    row = conn.execute(
+        "SELECT * FROM prediction_resolutions WHERE prediction_id = ?", (prediction_id,)
+    ).fetchone()
+    if row is None:
+        return None
+    return PredictionResolution(
+        prediction_id=row["prediction_id"],
+        resolved_at=datetime.fromisoformat(row["resolved_at"]),
+        outcome=row["outcome"],
+        reasoning=row["reasoning"],
+        resolver=row["resolver"],
+    )
+
+
+def get_resolved_predictions(
+    conn: sqlite3.Connection,
+) -> list[tuple[Prediction, PredictionResolution]]:
+    """Every prediction that has a resolution, for scorecard/Brier scoring."""
+    rows = conn.execute(
+        """
+        SELECT p.*, r.resolved_at, r.outcome, r.reasoning, r.resolver
+        FROM predictions p
+        JOIN prediction_resolutions r ON p.id = r.prediction_id
+        """
+    ).fetchall()
+    results = []
+    for row in rows:
+        prediction = _prediction_from_row(row)
+        resolution = PredictionResolution(
+            prediction_id=row["id"],
+            resolved_at=datetime.fromisoformat(row["resolved_at"]),
+            outcome=row["outcome"],
+            reasoning=row["reasoning"],
+            resolver=row["resolver"],
+        )
+        results.append((prediction, resolution))
+    return results
 
 
 def log_llm_usage(

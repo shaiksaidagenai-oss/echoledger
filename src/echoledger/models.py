@@ -62,6 +62,34 @@ class NewsSummary(BaseModel):
     model: str
 
 
+class Prediction(BaseModel):
+    """A forecast, logged once and NEVER modified afterward (the honesty
+    rule: predictions are immutable/append-only). Resolution is a separate,
+    later event recorded in PredictionResolution - not an edit to this row.
+    `forecaster` is deliberately generic (not just "the LLM") so a human
+    could own a prediction later without changing this model."""
+
+    id: str
+    created_date: date
+    resolution_date: date  # before `date` would appear below, but there's no bare `date` field here
+    statement: str
+    probability: float
+    forecaster: str
+
+
+class PredictionResolution(BaseModel):
+    """The real-world outcome for one Prediction, recorded separately so the
+    original claim is never touched. `outcome` is deliberately not a plain
+    bool - a genuine "we don't have enough evidence yet" is honest, not a
+    failure, and forcing a fake true/false would violate the honesty rule."""
+
+    prediction_id: str
+    resolved_at: datetime
+    outcome: str  # "true" | "false" | "unclear"
+    reasoning: str
+    resolver: str
+
+
 class EchoCandidate(BaseModel):
     """The most similar 1926 article found for one TodayHeadline, by
     embedding similarity - time-filtered so it can never be dated after
