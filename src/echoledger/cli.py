@@ -8,6 +8,7 @@ from datetime import date
 from echoledger.api.views import build_daily_view
 from echoledger.config import DB_PATH, LLM_MODEL, NEWSPAPER_KEY, RAW_DIR
 from echoledger.evals.brier import brier_score
+from echoledger.evals.leakage_judge import judge_diary_entry
 from echoledger.llm.arthur import write_diary_entry
 from echoledger.llm.news_summary import summarize_headlines
 from echoledger.llm.predictions import generate_predictions, resolve_predictions
@@ -20,6 +21,7 @@ from echoledger.storage.db import (
     get_diary_entry,
     get_echo_candidates,
     get_historical_articles,
+    get_leakage_judgment,
     get_news_summaries,
     get_predictions_created_on,
     get_resolved_predictions,
@@ -69,8 +71,15 @@ def cmd_fetch(args: argparse.Namespace) -> None:
     # LLM steps - each checks first and skips if already done, so re-running
     # `fetch` for a date you've already processed never spends money twice.
     if get_diary_entry(conn, historical_date) is None:
-        write_diary_entry(conn, historical_date, historical_articles, model=LLM_MODEL)
+        entry = write_diary_entry(conn, historical_date, historical_articles, model=LLM_MODEL)
         print(f"  Arthur wrote his diary entry for {historical_date} ({LLM_MODEL}).")
+        judgment = judge_diary_entry(conn, entry, model=LLM_MODEL)
+        if judgment.verdict == "fail":
+            print(f"  [!] LEAKAGE WARNING for {historical_date}:")
+            for violation in judgment.violations:
+                print(f"      - {violation}")
+        else:
+            print(f"  Leakage judge: pass ({historical_date}).")
     else:
         print(f"  Arthur's diary entry for {historical_date} already exists - skipping.")
 
@@ -126,6 +135,7 @@ def cmd_show(args: argparse.Namespace) -> None:
     conn = connect(DB_PATH)
     view = build_daily_view(conn, on_date)
     predictions = get_predictions_created_on(conn, on_date)
+    judgment = get_leakage_judgment(conn, view.historical_date)
     conn.close()
 
     print(f"=== {view.date.isoformat()} <-> {view.historical_date.isoformat()} ===\n")
@@ -136,6 +146,10 @@ def cmd_show(args: argparse.Namespace) -> None:
         print("  (nothing cached yet - run `echoledger fetch` first)")
     else:
         print(view.diary_entry)
+        if judgment is not None and judgment.verdict == "fail":
+            print("\n  [!] LEAKAGE WARNING - the automated judge flagged this entry:")
+            for violation in judgment.violations:
+                print(f"      - {violation}")
 
     print(f"\n--- Today's Top Headlines ({view.date.isoformat()}) ---")
     if not view.news:
