@@ -117,9 +117,35 @@ leakage (not just the prompt instruction); basic guardrails; a real-API eval gat
   Phase 7.
 - **Eval gate in CI:** `tests/test_real_leakage_eval.py`, a golden-set eval against the REAL
   API, marked `real_api` and excluded from the default (free, fast) `pytest` run. New
-  `.github/workflows/eval.yml` runs it weekly + on manual dispatch - needs an
-  `ANTHROPIC_API_KEY` GitHub secret (not yet added).
+  `.github/workflows/eval.yml` runs it weekly + on manual dispatch. `ANTHROPIC_API_KEY` GitHub
+  secret added and confirmed working via a real manual-trigger run.
 - 87 tests total (85 fast + 2 real-API), all passing.
+
+## Phase 5 — LangGraph + human approval + A2A Verification agent: IN PROGRESS
+
+Target deliverable: the daily workflow uses real multi-step orchestration (LangGraph) with a
+genuine human-approval pause; a separate Verification agent reached over A2A.
+
+**Status: part 1 of 2 done (2026-11-04).** Deliberately split into two sessions - LangGraph +
+A2A + a new data-model change all at once would be too much new surface area at once.
+
+- **Done:** `agents/diary_workflow.py` - Arthur's write -> judge -> approve -> finalize sequence
+  as a real LangGraph `StateGraph`, using `interrupt()`/`Command(resume=...)` to genuinely pause
+  for a human decision (not a simulation). Scoped to just the diary entry (user's call) -
+  `ArthurDiaryEntry` gained `approved: bool`; `build_daily_view` hides unapproved text behind a
+  `diary_pending` flag instead of showing it.
+- **Two real bugs caught by actual interactive testing** (not unit tests, which all passed the
+  whole time): (1) graph state held a raw Pydantic object, which LangGraph's checkpointer
+  doesn't know how to deserialize on resume (wrong assumption that `InMemorySaver` passes
+  objects through untouched) - fixed by keeping state to plain primitives only; (2) Windows
+  PowerShell's `"y" | command` prepends an invisible BOM to stdin, so a piped "y" test still
+  showed "rejected" even after fix #1 - fixed by stripping the BOM explicitly in the approval
+  prompt's input parsing.
+- **Not done yet:** the Verification agent as an independent service over A2A (Python SDK
+  `a2a-sdk`, stable spec v1.0.1 as of checking - researched `AgentCard`/`AgentSkill`/
+  `AgentExecutor`/`DefaultRequestHandler` shapes before building, not from stale memory). Next
+  session: pull the leakage judge out into its own standalone server, called remotely instead
+  of in-process.
 
 ### Key decision: 1926 data source
 
@@ -163,8 +189,9 @@ API, and NOT an India-based source. Reasoning, for future reference:
 ## Tech stack
 
 Python 3.11+ (3.13.1 installed), venv named `EchoLedger/` (gitignored). Dependencies: pydantic,
-httpx, python-dotenv, tzdata (Windows only), anthropic, fastapi, uvicorn, openai, chromadb. Dev
-tools: pytest, ruff, mypy. Ask before adding any dependency not listed here or in `pyproject.toml`.
+httpx, python-dotenv, tzdata (Windows only), anthropic, fastapi, uvicorn, openai, chromadb,
+langgraph. Dev tools: pytest, ruff, mypy. Ask before adding any dependency not listed here or in
+`pyproject.toml`. (a2a-sdk coming next session for the Verification agent.)
 
 ## Repo structure (current)
 
@@ -182,7 +209,8 @@ echoledger/
 │   ├── api/          (app.py, views.py, schemas.py)
 │   ├── rag/          (embeddings.py, vector_store.py, index.py, echo.py)
 │   ├── evals/        (brier.py, leakage_judge.py)
-│   └── guardrails/   (injection.py, copyright.py)
+│   ├── guardrails/   (injection.py, copyright.py)
+│   └── agents/       (diary_workflow.py)
 ├── tests/
 └── data/              # gitignored — downloaded datasets, SQLite db, data/chroma/ vector store
 ```

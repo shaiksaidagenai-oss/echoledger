@@ -1,5 +1,42 @@
 # Progress Log
 
+## Session 6 — LangGraph diary workflow (Phase 5, part 1 of 2)
+
+**Not Phase 5 complete yet - just the LangGraph + human-approval half. The A2A Verification
+agent (pulling the leakage judge into its own separate service) is a deliberately separate,
+later session - too much new surface area (LangGraph + A2A + a new data model change all at
+once) to introduce responsibly in one leap.**
+
+- Scoped human approval to just Arthur's diary entry (your call) - summaries/predictions stay
+  auto-visible like before. `ArthurDiaryEntry` gained `approved: bool`; `build_daily_view` only
+  shows `diary_entry` text when approved, with a new `diary_pending` flag.
+- Real schema migration handled carefully: the existing database already had real
+  `arthur_diary_entries` rows from before this column existed - `CREATE TABLE IF NOT EXISTS`
+  doesn't retroactively add columns, so added `_ensure_column()` (`ALTER TABLE ... ADD COLUMN`)
+  rather than losing real data.
+- `agents/diary_workflow.py`: write -> judge -> approve -> finalize as a real LangGraph
+  `StateGraph`, using `interrupt()`/`Command(resume=...)` - genuinely pauses the graph until a
+  human answers, not a simulation. Approval happens synchronously within one call (you're
+  already there to answer), avoiding the need for a persistent checkpointer across separate
+  process runs.
+- **Two real bugs found and fixed via actual interactive testing, not just unit tests:**
+  1. Graph state held a raw `ArthurDiaryEntry` Pydantic object - LangGraph's checkpointer
+     serializes state internally even with `InMemorySaver` (a wrong assumption going in), and
+     warned about an unregistered type on resume. Fixed: state now holds only plain primitives;
+     the real object is reconstructed outside the graph once the workflow finishes.
+  2. Even after fix #1, a real test piping "y" to approve still showed "rejected." Isolated the
+     actual cause: **Windows PowerShell's `"y" | command` prepends an invisible UTF-8 BOM
+     character to stdin**, so `input()` received `'﻿y'`, not `'y'`, and plain `.strip()`
+     doesn't remove a BOM. Fixed by stripping it explicitly. Worth being honest that fix #1,
+     while real and worth keeping, wasn't actually the cause of the wrong result - only #2 was.
+- Re-verified both branches for real after the fixes: approved entries show via `show`,
+  rejected ones are genuinely hidden ("a draft exists but was not approved - not shown").
+- 88 tests total, all green.
+
+**Phase 5 "done" checklist:**
+- [x] LangGraph orchestration with real human-in-the-loop approval
+- [ ] Verification agent as an independent service, reached via A2A - next session
+
 ## Session 5, continued — Guardrails + eval gate in CI (Phase 4, part 3 of 3 - DONE)
 
 **Phase 4 complete.** All four pieces built, wired in, and verified for real.
