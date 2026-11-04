@@ -1,5 +1,40 @@
 # Progress Log
 
+## Session 5 — 2026-11-04 (Phase 4, part 1 of ~3)
+
+**Prediction Ledger complete and verified for real. Leakage judge, broader guardrails, and the
+CI eval gate are still open - Phase 4 is NOT done yet, just its first piece.**
+
+- Resolution method decided: fully automatic (your call) - Claude judges due predictions using
+  ONLY our own accumulated real news (TodayHeadline/NewsSummary rows), never its own training
+  knowledge, since these events may postdate its training cutoff.
+- `Prediction`/`PredictionResolution` as two separate models/tables, both INSERT-only (not
+  INSERT OR REPLACE) - saving the same id twice raises `sqlite3.IntegrityError` instead of
+  silently overwriting. The honesty rule (immutable/append-only) enforced at the DB level.
+- `outcome` is `"true"/"false"/"unclear"`, not a plain bool - "unclear" (not enough evidence) is
+  an honest result, not a failure, and `brier_score()` correctly excludes it from scoring.
+- Finance-topic guardrail (keyword filter, defense-in-depth beyond the prompt instruction) -
+  same "don't trust prompting alone" lesson as leakage prevention. Didn't need to reject
+  anything in the real run, but exists for when it does.
+- Wired into `fetch` (generates + resolves, both idempotent), new `echoledger scorecard` CLI
+  command, new `GET /scorecard` API endpoint.
+- **Verified for real, twice:** (1) real `fetch` generated 3 genuine, non-financial, specific
+  predictions from today's actual news (South Africa's ANC local elections, Japan's nuclear
+  policy stance, a Ukraine-Russia ceasefire holding) - none were due for resolution yet.
+  (2) To test resolution specifically (the riskier, more novel half), injected one synthetic
+  test prediction with a known real answer ("will Erin Patterson's appeal succeed" - we already
+  had the real answer stored from an earlier session: it was rejected) - Claude correctly
+  resolved it "false," citing our own stored headline as evidence verbatim. Cleaned up the test
+  prediction afterward so it doesn't pollute the real scorecard.
+- 73 tests total, all green.
+
+**What's left for Phase 4:**
+- Automated leakage judge (deferred since Phase 2) - score Arthur's entries for anachronisms,
+  not just trust the prompt instruction.
+- Broader guardrails - prompt-injection defense for fetched text (we treat it as untrusted in
+  principle, but have no actual check yet).
+- Eval gate in CI - wire an evaluation check into GitHub Actions so a regression can fail a build.
+
 ## Session 4 — 2026-11-04 (Phase 3)
 
 **Phase 3 complete: embeddings + Chroma vector search + History Echo, end-to-end.**
