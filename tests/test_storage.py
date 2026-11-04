@@ -6,6 +6,7 @@ import pytest
 from echoledger.models import (
     ArthurDiaryEntry,
     HistoricalArticle,
+    LeakageJudgment,
     NewsSummary,
     Prediction,
     PredictionResolution,
@@ -15,6 +16,7 @@ from echoledger.storage.db import (
     connect,
     get_diary_entry,
     get_historical_articles,
+    get_leakage_judgment,
     get_news_summaries,
     get_pending_predictions,
     get_predictions_created_on,
@@ -26,6 +28,7 @@ from echoledger.storage.db import (
     mark_year_ingested,
     save_diary_entry,
     save_historical_article,
+    save_leakage_judgment,
     save_news_summary,
     save_prediction,
     save_resolution,
@@ -255,3 +258,34 @@ def test_save_and_get_resolution(conn: sqlite3.Connection) -> None:
     assert len(resolved) == 1
     assert resolved[0][0].id == "pred-1"
     assert resolved[0][1].outcome == "false"
+
+
+def test_save_and_get_leakage_judgment(conn: sqlite3.Connection) -> None:
+    judgment = LeakageJudgment(
+        historical_date=date(1926, 10, 29),
+        verdict="fail",
+        violations=["mentions a 1950 invention -- anachronism"],
+        model="claude-haiku-4-5",
+        judged_at=datetime(2026, 10, 29, 9, 0, 0),
+    )
+
+    save_leakage_judgment(conn, judgment)
+
+    assert get_leakage_judgment(conn, date(1926, 10, 29)) == judgment
+    assert get_leakage_judgment(conn, date(1926, 10, 30)) is None
+
+
+def test_save_leakage_judgment_twice_replaces_not_duplicates(conn: sqlite3.Connection) -> None:
+    first = LeakageJudgment(
+        historical_date=date(1926, 10, 29),
+        verdict="fail",
+        violations=["a violation"],
+        model="claude-haiku-4-5",
+        judged_at=datetime(2026, 10, 29, 9, 0, 0),
+    )
+    second = first.model_copy(update={"verdict": "pass", "violations": []})
+
+    save_leakage_judgment(conn, first)
+    save_leakage_judgment(conn, second)
+
+    assert get_leakage_judgment(conn, date(1926, 10, 29)) == second

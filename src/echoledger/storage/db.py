@@ -15,6 +15,7 @@ from echoledger.models import (
     ArthurDiaryEntry,
     EchoCandidate,
     HistoricalArticle,
+    LeakageJudgment,
     NewsSummary,
     Prediction,
     PredictionResolution,
@@ -71,6 +72,16 @@ CREATE TABLE IF NOT EXISTS echo_candidates (
     historical_headline TEXT NOT NULL,
     historical_date TEXT NOT NULL,
     distance REAL NOT NULL
+);
+
+-- A dedicated QA check, not a public claim - unlike predictions, re-judging
+-- the same date is fine to overwrite (INSERT OR REPLACE, used below).
+CREATE TABLE IF NOT EXISTS leakage_judgments (
+    historical_date TEXT PRIMARY KEY,
+    verdict TEXT NOT NULL,
+    violations TEXT NOT NULL,  -- JSON-encoded list[str]
+    model TEXT NOT NULL,
+    judged_at TEXT NOT NULL
 );
 
 -- Honesty rule: predictions are immutable/append-only once logged. No code
@@ -240,6 +251,40 @@ def get_diary_entry(conn: sqlite3.Connection, on_date: date) -> ArthurDiaryEntry
         entry_text=row["entry_text"],
         source_article_ids=json.loads(row["source_article_ids"]),
         model=row["model"],
+    )
+
+
+def save_leakage_judgment(conn: sqlite3.Connection, judgment: LeakageJudgment) -> None:
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO leakage_judgments
+            (historical_date, verdict, violations, model, judged_at)
+        VALUES (:historical_date, :verdict, :violations, :model, :judged_at)
+        """,
+        {
+            "historical_date": judgment.historical_date.isoformat(),
+            "verdict": judgment.verdict,
+            "violations": json.dumps(judgment.violations),
+            "model": judgment.model,
+            "judged_at": judgment.judged_at.isoformat(),
+        },
+    )
+    conn.commit()
+
+
+def get_leakage_judgment(conn: sqlite3.Connection, historical_date: date) -> LeakageJudgment | None:
+    row = conn.execute(
+        "SELECT * FROM leakage_judgments WHERE historical_date = ?",
+        (historical_date.isoformat(),),
+    ).fetchone()
+    if row is None:
+        return None
+    return LeakageJudgment(
+        historical_date=date.fromisoformat(row["historical_date"]),
+        verdict=row["verdict"],
+        violations=json.loads(row["violations"]),
+        model=row["model"],
+        judged_at=datetime.fromisoformat(row["judged_at"]),
     )
 
 

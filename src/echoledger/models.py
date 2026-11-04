@@ -41,14 +41,28 @@ class TodayHeadline(BaseModel):
 
 class ArthurDiaryEntry(BaseModel):
     """Arthur's diary entry for one historical date, grounded in real
-    HistoricalArticles. Leakage prevention (Arthur must not know about
-    anything after his own date) is handled by prompting, not by this
-    model - an automated leakage *judge* is Phase 4, not here yet."""
+    HistoricalArticles. Leakage prevention at generation time is
+    prompting only - see LeakageJudgment below for the separate,
+    dedicated check."""
 
     date: date
     entry_text: str
     source_article_ids: list[str]
     model: str
+
+
+class LeakageJudgment(BaseModel):
+    """A dedicated, separate LLM call that reviews a completed
+    ArthurDiaryEntry for anachronisms - not just trusting the generation
+    prompt. Re-judging the same date replaces the old result (not
+    immutable like Prediction - this is our own QA check, not a public
+    claim)."""
+
+    historical_date: date
+    verdict: str  # "pass" | "fail"
+    violations: list[str]
+    model: str
+    judged_at: datetime
 
 
 class NewsSummary(BaseModel):
