@@ -121,31 +121,43 @@ leakage (not just the prompt instruction); basic guardrails; a real-API eval gat
   secret added and confirmed working via a real manual-trigger run.
 - 87 tests total (85 fast + 2 real-API), all passing.
 
-## Phase 5 — LangGraph + human approval + A2A Verification agent: IN PROGRESS
+## Phase 5 — LangGraph + human approval + A2A Verification agent: DONE (2026-11-05)
 
 Target deliverable: the daily workflow uses real multi-step orchestration (LangGraph) with a
 genuine human-approval pause; a separate Verification agent reached over A2A.
 
-**Status: part 1 of 2 done (2026-11-04).** Deliberately split into two sessions - LangGraph +
-A2A + a new data-model change all at once would be too much new surface area at once.
+**Status: done, both halves verified for real.** Deliberately split into two sessions -
+LangGraph + A2A + a new data-model change all at once would be too much new surface area at once.
 
-- **Done:** `agents/diary_workflow.py` - Arthur's write -> judge -> approve -> finalize sequence
+- **Part 1:** `agents/diary_workflow.py` - Arthur's write -> judge -> approve -> finalize sequence
   as a real LangGraph `StateGraph`, using `interrupt()`/`Command(resume=...)` to genuinely pause
   for a human decision (not a simulation). Scoped to just the diary entry (user's call) -
   `ArthurDiaryEntry` gained `approved: bool`; `build_daily_view` hides unapproved text behind a
-  `diary_pending` flag instead of showing it.
-- **Two real bugs caught by actual interactive testing** (not unit tests, which all passed the
-  whole time): (1) graph state held a raw Pydantic object, which LangGraph's checkpointer
-  doesn't know how to deserialize on resume (wrong assumption that `InMemorySaver` passes
-  objects through untouched) - fixed by keeping state to plain primitives only; (2) Windows
-  PowerShell's `"y" | command` prepends an invisible BOM to stdin, so a piped "y" test still
-  showed "rejected" even after fix #1 - fixed by stripping the BOM explicitly in the approval
-  prompt's input parsing.
-- **Not done yet:** the Verification agent as an independent service over A2A (Python SDK
-  `a2a-sdk`, stable spec v1.0.1 as of checking - researched `AgentCard`/`AgentSkill`/
-  `AgentExecutor`/`DefaultRequestHandler` shapes before building, not from stale memory). Next
-  session: pull the leakage judge out into its own standalone server, called remotely instead
-  of in-process.
+  `diary_pending` flag instead of showing it. A rejection isn't final either - a reviewer can ask
+  for a fresh draft instead (up to `max_attempts`), looping `write -> judge -> approval` back on
+  itself via `add_conditional_edges()`.
+- **Part 2:** the leakage judge now runs as `services/verification_agent/`, a standalone FastAPI
+  server exposing it as an A2A skill, called over the network via a new `judge_via_a2a` client
+  (`agents/verification_client.py`) injected into `judge_node` the same DI way as every other
+  external API in this project.
+- **Real bugs caught only by actually running the code, not by unit tests or static checks**
+  (full list with root causes in PROGRESS.md Session 6/7): a raw Pydantic object surviving in
+  graph state despite LangGraph's checkpointer serializing everything; Windows PowerShell's
+  `"y" | command` silently prepending a UTF-8 BOM to stdin; a missing `await` on an async
+  `create_client()` the SDK's type stubs made easy to miss; A2A requiring a `Task` to be
+  enqueued before any status update references it; a message sent with the wrong default
+  `role`; and `EventQueue.enqueue_event()` being async in a way `inspect.signature()` didn't
+  reveal, silently dropping the enqueued Task until `await`ed.
+- **Verified for real end-to-end:** started the Verification agent as its own OS process, called
+  it from a separate Python process over real HTTP/JSONRPC, and confirmed in the database that
+  the *server* (not the caller) persisted its own `leakage_judgments` row - genuine
+  independent-service behavior, not an in-process call dressed up to look like one.
+- The installed `a2a-sdk` is protobuf-based (`a2a.types.*` are generated `MessageMeta` classes),
+  not the Pydantic models some tutorials describe - confirmed via `.DESCRIPTOR.fields`
+  introspection rather than trusting docs, which also named a module path
+  (`a2a.server.request_context`) that doesn't exist in this version (real path:
+  `a2a.server.agent_execution`).
+- 92 tests total, all green. Ruff and mypy clean.
 
 ### Key decision: 1926 data source
 
@@ -190,8 +202,8 @@ API, and NOT an India-based source. Reasoning, for future reference:
 
 Python 3.11+ (3.13.1 installed), venv named `EchoLedger/` (gitignored). Dependencies: pydantic,
 httpx, python-dotenv, tzdata (Windows only), anthropic, fastapi, uvicorn, openai, chromadb,
-langgraph. Dev tools: pytest, ruff, mypy. Ask before adding any dependency not listed here or in
-`pyproject.toml`. (a2a-sdk coming next session for the Verification agent.)
+langgraph, a2a-sdk, sse-starlette. Dev tools: pytest, ruff, mypy. Ask before adding any
+dependency not listed here or in `pyproject.toml`.
 
 ## Repo structure (current)
 
@@ -210,7 +222,9 @@ echoledger/
 │   ├── rag/          (embeddings.py, vector_store.py, index.py, echo.py)
 │   ├── evals/        (brier.py, leakage_judge.py)
 │   ├── guardrails/   (injection.py, copyright.py)
-│   └── agents/       (diary_workflow.py)
+│   └── agents/       (diary_workflow.py, verification_client.py)
+├── services/
+│   └── verification_agent/  (server.py — standalone A2A server, run separately)
 ├── tests/
 └── data/              # gitignored — downloaded datasets, SQLite db, data/chroma/ vector store
 ```

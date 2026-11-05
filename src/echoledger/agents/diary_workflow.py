@@ -20,9 +20,17 @@ even with InMemorySaver, and doesn't know how to deserialize arbitrary
 custom types. The real ArthurDiaryEntry is only ever constructed outside
 the graph, from these primitives, once the workflow finishes.
 
-`get_approval` is injected (same dependency-injection pattern used
-everywhere else in this project for the real API clients) so tests can
-pass a canned function instead of a real terminal prompt.
+`get_approval` and `judge_fn` are both injected (same dependency-injection
+pattern used everywhere else in this project for the real API clients) so
+tests can pass canned functions instead of a real terminal prompt or a
+real network call to the Verification agent.
+
+The judge step now calls the Verification agent OVER THE NETWORK
+(judge_via_a2a) instead of judge_diary_entry() in-process - pulling it
+out into services/verification_agent as its own independent service,
+reached via A2A, per the roadmap. That server process persists its own
+LeakageJudgment row; this module no longer needs a DB connection or an
+Anthropic client for the judge step at all.
 """
 
 from __future__ import annotations
@@ -37,7 +45,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import START, StateGraph
 from langgraph.types import Command, interrupt
 
-from echoledger.evals.leakage_judge import judge_diary_entry
+from echoledger.agents.verification_client import judge_via_a2a
 from echoledger.llm.arthur import write_diary_entry
 from echoledger.models import ArthurDiaryEntry, HistoricalArticle
 from echoledger.storage.db import set_diary_approved
@@ -63,8 +71,10 @@ def run_diary_workflow(
     get_approval: Callable[[str, str, list[str], int, int], str],
     client: anthropic.Anthropic | None = None,
     max_attempts: int = DEFAULT_MAX_ATTEMPTS,
+    judge_fn: Callable[[str, date], tuple[str, list[str]]] = judge_via_a2a,
 ) -> ArthurDiaryEntry:
-    """Writes a diary entry, judges it, pauses for approval via
+    """Writes a diary entry, judges it (via the remote Verification
+    agent), pauses for approval via
     `get_approval(entry_text, verdict, violations, attempt, max_attempts)`
     (must return "approve"/"reject"/"regenerate"). A "regenerate" decision
     loops back to a fresh draft, up to `max_attempts` total attempts.
@@ -80,16 +90,8 @@ def run_diary_workflow(
 
     def judge_node(state: _DiaryWorkflowState) -> dict[str, object]:
         assert state["entry_text"] is not None
-        # judge_diary_entry needs an ArthurDiaryEntry - built fresh here from
-        # plain state, never stored back into the graph's own state.
-        draft = ArthurDiaryEntry(
-            date=historical_date,
-            entry_text=state["entry_text"],
-            source_article_ids=state["source_article_ids"],
-            model=model,
-        )
-        judgment = judge_diary_entry(conn, draft, model=model, client=client)
-        return {"verdict": judgment.verdict, "violations": judgment.violations}
+        verdict, violations = judge_fn(state["entry_text"], historical_date)
+        return {"verdict": verdict, "violations": violations}
 
     def approval_node(state: _DiaryWorkflowState) -> dict[str, object]:
         decision = interrupt(

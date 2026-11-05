@@ -1,5 +1,55 @@
 # Progress Log
 
+## Session 7 — Verification agent over A2A (Phase 5, part 2 of 2 — DONE)
+
+**Finishes Phase 5.** Pulled the leakage judge out of the in-process LangGraph workflow into
+`services/verification_agent/`, a standalone FastAPI server exposing it as an A2A skill. The
+main workflow (`agents/diary_workflow.py`'s `judge_node`) now calls it over the network via a
+new `judge_via_a2a` client (`agents/verification_client.py`), injected through the same
+dependency-injection pattern used everywhere else in this project (`judge_fn` parameter,
+defaults to the real network call, tests pass a fake).
+
+**The installed `a2a-sdk` is a protobuf-based implementation, not the Pydantic-model tutorials
+describe** - `a2a.types.*` are generated `MessageMeta`/protobuf classes, found via direct
+introspection (`.DESCRIPTOR.fields`) rather than trusting fetched docs, which also pointed at a
+module path (`a2a.server.request_context`) that doesn't exist in this version (real path:
+`a2a.server.agent_execution`).
+
+**Five real bugs found only by actually running the client against the real server - none of
+these showed up in a quick read of the code:**
+1. `a2a_client.create_client()` is async; missing `await` produced a coroutine object with no
+   `.send_message`, confirmed by both mypy and the real first test run.
+2. `TaskUpdater` requires `str` for `task_id`/`context_id`, but `RequestContext` types them
+   `str | None` - needed explicit `assert`s (mypy caught this one before runtime).
+3. The A2A spec requires a `Task` to be enqueued before any status-update event referencing it -
+   our executor skipped straight to `start_work()`. Fixed with
+   `event_queue.enqueue_event(new_task_from_user_message(context.message))` first.
+4. `new_text_message()` defaults to `role=ROLE_AGENT`; the server's
+   `new_task_from_user_message()` rejects anything but `ROLE_USER` - our client was sending as
+   the wrong role. Fixed by passing `role=a2a_types.Role.ROLE_USER` explicitly.
+5. `EventQueue.enqueue_event()` is itself a coroutine despite `inspect.signature()` not making
+   that visible - missing `await` silently dropped the enqueued Task (surfaced only as a
+   `RuntimeWarning: coroutine ... was never awaited` in the server's own log, not an exception).
+   Also: a non-streaming response comes back as a `Task`, and `get_stream_response_text()` only
+   reads a `Task`'s *artifacts*, not its completion message - had to `add_artifact()` before
+   `complete()`.
+
+**Verified for real, not just unit tests**: started the server as its own process
+(`python -m services.verification_agent.server`), confirmed `GET /` correctly 405s (JSONRPC is
+POST-only) before wiring anything up, then called `judge_via_a2a()` against the live server and
+got back a genuine verdict - and confirmed in the database that the *server process* (not the
+caller) persisted its own `leakage_judgments` row, proving the judge really ran as an independent
+service reached over the network, not an in-process call dressed up to look like one.
+
+Also added `sse-starlette` to `pyproject.toml` (a transitive dependency of `a2a.server.routes`
+that had only been `pip install`ed ad hoc until now - would have broken a fresh install/CI).
+
+92 tests total, all green. Ruff and mypy clean.
+
+**Phase 5 "done" checklist:**
+- [x] LangGraph orchestration with real human-in-the-loop approval
+- [x] Verification agent as an independent service, reached via A2A
+
 ## Session 6, continued — Regeneration loop + a real crash fix
 
 **Directly strengthened the highest-leakage-risk content, per explicit request.**

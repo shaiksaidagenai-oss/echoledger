@@ -12,20 +12,14 @@ from echoledger.storage.db import connect, get_diary_entry
 class _FakeMessages:
     """Returns the next entry text in sequence each time `write` is
     called, like a real model would produce a different draft each
-    regeneration - and a fixed judge verdict every time."""
+    regeneration. The judge step no longer goes through this client at
+    all - it's a separate network call to the Verification agent, faked
+    via `judge_fn` instead (see `_fake_judge` below)."""
 
-    def __init__(self, entry_texts: list[str], verdict: str = "pass") -> None:
+    def __init__(self, entry_texts: list[str]) -> None:
         self._entry_texts = iter(entry_texts)
-        self._verdict = verdict
 
     def parse(self, **kwargs: object) -> SimpleNamespace:
-        system = kwargs.get("system", "")
-        assert isinstance(system, str)
-        if "fact-checker" in system:
-            return SimpleNamespace(
-                parsed_output=SimpleNamespace(verdict=self._verdict, violations=[]),
-                usage=SimpleNamespace(input_tokens=100, output_tokens=50),
-            )
         return SimpleNamespace(
             parsed_output=SimpleNamespace(entry_text=next(self._entry_texts)),
             usage=SimpleNamespace(input_tokens=100, output_tokens=50),
@@ -33,8 +27,15 @@ class _FakeMessages:
 
 
 class _FakeClient:
-    def __init__(self, entry_texts: list[str], verdict: str = "pass") -> None:
-        self.messages = _FakeMessages(entry_texts, verdict)
+    def __init__(self, entry_texts: list[str]) -> None:
+        self.messages = _FakeMessages(entry_texts)
+
+
+def _fake_judge(entry_text: str, historical_date: date) -> tuple[str, list[str]]:
+    """Stands in for judge_via_a2a - the tests only care about the
+    get_approval callback's decisions, not the judge's verdict, so this
+    always reports a clean pass."""
+    return "pass", []
 
 
 @pytest.fixture
@@ -68,6 +69,7 @@ def test_run_diary_workflow_approved_first_attempt(conn: sqlite3.Connection) -> 
         model="claude-haiku-4-5",
         get_approval=_approve,
         client=fake_client,  # type: ignore[arg-type]
+        judge_fn=_fake_judge,
     )
 
     assert entry.approved is True
@@ -90,6 +92,7 @@ def test_run_diary_workflow_rejected_without_regenerating(conn: sqlite3.Connecti
         model="claude-haiku-4-5",
         get_approval=_reject,
         client=fake_client,  # type: ignore[arg-type]
+        judge_fn=_fake_judge,
     )
 
     assert entry.approved is False
@@ -113,6 +116,7 @@ def test_run_diary_workflow_regenerates_then_approves(conn: sqlite3.Connection) 
         model="claude-haiku-4-5",
         get_approval=_regenerate_once_then_approve,
         client=fake_client,  # type: ignore[arg-type]
+        judge_fn=_fake_judge,
     )
 
     assert calls == [1, 2]  # the approval callback was genuinely invoked twice
@@ -121,7 +125,7 @@ def test_run_diary_workflow_regenerates_then_approves(conn: sqlite3.Connection) 
 
 
 def test_run_diary_workflow_stops_regenerating_at_max_attempts(conn: sqlite3.Connection) -> None:
-    fake_client = _FakeClient(["Draft one.", "Draft two."], verdict="fail")
+    fake_client = _FakeClient(["Draft one.", "Draft two."])
     calls: list[int] = []
 
     def _always_try_to_regenerate(
@@ -138,6 +142,7 @@ def test_run_diary_workflow_stops_regenerating_at_max_attempts(conn: sqlite3.Con
         get_approval=_always_try_to_regenerate,
         client=fake_client,  # type: ignore[arg-type]
         max_attempts=2,
+        judge_fn=_fake_judge,
     )
 
     assert calls == [1, 2]  # stopped asking once max_attempts was reached
