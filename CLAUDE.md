@@ -12,10 +12,18 @@ with four sections:
    publicly including misses (Brier score, calibration).
 4. **History Echo** — when a 1926 story meaningfully mirrors a 2026 story, highlight it.
 
-Long-term: a public REST API + MCP server for the archive/predictions/scorecard. Built gradually,
-no deadlines, in small sessions. The user is a learner (knows Python/NumPy/embeddings basics; new
-to RAG/LangChain/agents/MCP/A2A/Docker/CI-CD/AWS) — explain new concepts briefly as they come up,
-keep code small and readable, explore+plan before writing code.
+Long-term: a public REST API for the archive/predictions/scorecard. Built gradually, no
+deadlines, in small sessions. The user is a learner (knows Python/NumPy/embeddings basics; new to
+RAG/LangChain/agents/A2A/Docker/CI-CD/AWS) — explain new concepts briefly as they come up, keep
+code small and readable, explore+plan before writing code.
+
+**Scope decision (2026-11-05): MCP server dropped from the roadmap.** Discussed: an MCP server
+would only wrap the existing read-only REST API as callable tools for MCP-aware clients
+(Claude Desktop, claude.ai) - no new product capability, since Arthur/predictions/scorecard
+logic would be unchanged either way. Low cost to build (thin wrapper), but also low value
+(nothing about actually shipping EchoLedger depends on it) - the user decided to cut it and
+focus remaining effort on AWS deployment instead. Revisit only if a concrete reason to want
+MCP access shows up later; don't reintroduce it by default.
 
 ## Non-negotiable rules
 
@@ -114,7 +122,7 @@ leakage (not just the prompt instruction); basic guardrails; a real-API eval gat
   PREVIOUS INSTRUCTIONS" injection was completely ignored by the real model), copyright
   similarity check (a summary that echoes its source gets rejected, falls back to the raw
   snippet). API auth/rate limiting deliberately NOT built - no public exposure yet, revisit at
-  Phase 7.
+  Phase 6.
 - **Eval gate in CI:** `tests/test_real_leakage_eval.py`, a golden-set eval against the REAL
   API, marked `real_api` and excluded from the default (free, fast) `pytest` run. New
   `.github/workflows/eval.yml` runs it weekly + on manual dispatch. `ANTHROPIC_API_KEY` GitHub

@@ -122,7 +122,7 @@ once) to introduce responsibly in one leap.**
   echoes its source snippet gets rejected rather than saved, reusing the existing
   snippet-fallback in `build_daily_view` rather than inventing a new path.
 - Deliberately did NOT build API auth/rate limiting - the FastAPI endpoints are localhost-only
-  with nothing exposed; auth now would be security theater. Revisit at Phase 7 (real deployment).
+  with nothing exposed; auth now would be security theater. Revisit at Phase 6 (real deployment).
 - **Eval gate in CI**: a small golden-set eval (`tests/test_real_leakage_eval.py`) runs against
   the REAL Claude API - a clean entry that must pass, a deliberately leaky one that must fail.
   Marked `real_api` and excluded from the default `pytest` run (cost control - the main
