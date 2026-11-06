@@ -41,7 +41,7 @@ from echoledger.evals.leakage_judge import judge_diary_entry
 from echoledger.models import ArthurDiaryEntry
 from echoledger.storage.db import connect
 
-HOST = "127.0.0.1"
+HOST = "0.0.0.0"  # deliberate - needs to be reachable from outside the container
 PORT = 9998
 
 

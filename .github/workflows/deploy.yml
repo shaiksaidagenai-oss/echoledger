@@ -12,6 +12,13 @@ permissions:
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - repository: echoledger
+            dockerfile: Dockerfile
+          - repository: echoledger-verification-agent
+            dockerfile: services/verification_agent/Dockerfile
     steps:
       - uses: actions/checkout@v4
 
@@ -28,9 +35,10 @@ jobs:
       - name: Build and push image
         env:
           REGISTRY: ${{ steps.ecr-login.outputs.registry }}
-          REPOSITORY: echoledger
+          REPOSITORY: ${{ matrix.repository }}
+          DOCKERFILE: ${{ matrix.dockerfile }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          docker build -t "$REGISTRY/$REPOSITORY:$IMAGE_TAG" -t "$REGISTRY/$REPOSITORY:latest" .
+          docker build -f "$DOCKERFILE" -t "$REGISTRY/$REPOSITORY:$IMAGE_TAG" -t "$REGISTRY/$REPOSITORY:latest" .
           docker push "$REGISTRY/$REPOSITORY:$IMAGE_TAG"
           docker push "$REGISTRY/$REPOSITORY:latest"

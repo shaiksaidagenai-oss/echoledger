@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from datetime import date
 
 import a2a.client as a2a_client
@@ -19,7 +20,10 @@ import a2a.helpers as a2a_helpers
 import a2a.types as a2a_types
 import httpx
 
-DEFAULT_AGENT_URL = "http://127.0.0.1:9998"
+# Deployed environments set ECHOLEDGER_VERIFICATION_AGENT_URL to the service's
+# Cloud Map DNS name; local dev falls back to the agent run directly on this
+# machine (`python -m services.verification_agent.server`).
+DEFAULT_AGENT_URL = os.getenv("ECHOLEDGER_VERIFICATION_AGENT_URL", "http://127.0.0.1:9998")
 
 
 async def _judge_via_a2a_async(
