@@ -1,5 +1,26 @@
 # Progress Log
 
+## Session 10 — Email approval, Session A: SES setup
+
+**First step of Step 2 (remote approval) - switched from the original WhatsApp idea to email**
+after comparing both directly: WhatsApp needs a Meta-reviewed message template before first
+send and can't hold the full diary text in a template anyway (user would still tap through to a
+web page to read it); email has no review process and the draft fits directly in the body.
+Also cleared up a cost misunderstanding along the way - HTTPS for a webhook/action-link endpoint
+does NOT require buying a domain; a Lambda Function URL provides one free.
+
+- Verified the account owner's email address as an SES identity (sandbox mode - 200
+  emails/day, more than enough for one email a day). Sandbox mode is fine permanently here,
+  since this only ever emails the user themselves - no need to ever request SES production
+  access.
+- **Verified for real, twice**: confirmed `GetIdentityVerificationAttributes` shows `Success`
+  via the API, then sent an actual test email and had the user confirm real delivery in their
+  inbox - not just that the API call returned successfully.
+
+**Session A "done" checklist:**
+- [x] SES identity verified (API-confirmed)
+- [x] Real test email sent and received (user-confirmed)
+
 ## Session 9 — Deploy the Verification agent to AWS
 
 **First step of the new post-roadmap phase** (agreed order: deploy Verification agent ->
