@@ -172,9 +172,17 @@ LangGraph + A2A + a new data-model change all at once would be too much new surf
 Target deliverable: EchoLedger containerized and running in AWS, with a persistent data store,
 secrets out of `.env`, a budget alarm, and an automated (GitHub Actions) deploy pipeline.
 
-**Status: Sessions A-C of F done (2026-11-06).** Broken into small sessions (A: account safety
+**Status: Sessions A-D of F done (2026-11-06).** Broken into small sessions (A: account safety
 net, B: secrets migration, C: build image in CI, D: persistent storage, E: compute + go live,
 F: verify + wrap up).
+
+- **Session D - persistent storage**: real, verified finding that changes Session E - App
+  Runner (originally assumed compute target) is explicitly stateless per AWS's own docs, no EFS
+  support. **Session E will use ECS Fargate instead**, which supports EFS volumes natively.
+  Created the EFS file system + an access point scoped to `/echoledger-data` (POSIX uid/gid
+  `0:0`, matching the Dockerfile's root user) + mount targets in the default VPC's 3 subnets,
+  all confirmed `available`. No app code changes needed - `ECHOLEDGER_DATA_DIR` already drives
+  `DATA_DIR`/`DB_PATH`/Chroma's path since Phase 1; Session E just points it at the EFS mount.
 
 - **Session C - build + push to ECR in CI**: finally verifies the Dockerfile for real (open
   exception since Phase 1 - local `docker build` hangs on this machine's VPN setup; building in

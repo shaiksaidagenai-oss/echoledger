@@ -1,5 +1,39 @@
 # Progress Log
 
+## Session 8, continued — Persistent storage via EFS (Phase 6, Session D of F)
+
+**Changes the Session E plan.** Before creating anything, checked AWS's own docs for whether
+App Runner (the compute platform assumed back in the original Phase 6 planning conversation)
+actually supports EFS - it does not. AWS states App Runner explicitly: "doesn't support a
+stateful app... implements the file system in your container instance as ephemeral storage."
+**Session E will use ECS Fargate instead** - confirmed via docs that Fargate task definitions
+support EFS volumes natively (`efsVolumeConfiguration` + `mountPoints`). Worth remembering: this
+is exactly why "verify before committing" matters even for throwaway planning-conversation
+assumptions, not just code.
+
+- Used the account's existing **default VPC** (3 public subnets, one per AZ in ap-southeast-2)
+  rather than building a custom VPC - a NAT gateway (needed for a *private*-subnet Fargate task
+  to reach the internet) costs real money per hour, which isn't justified for a project this
+  size. Accepted trade-off, noted for later if this ever needs hardening.
+- Created `echoledger-efs` security group: a single self-referencing rule (NFS/2049 from itself
+  only) - the same group will attach to both the EFS mount targets and the Fargate task's network
+  interface in Session E, with no exposure to the internet.
+- Created the EFS file system (`fs-0bdb392946541090a`, encrypted, bursting throughput - no
+  reason to pay for provisioned throughput at this scale) with mount targets in all 3 subnets,
+  and an **access point** (`fsap-0b16f15a72cbb283e`) scoped to `/echoledger-data` with POSIX
+  UID/GID `0:0` - matching the Dockerfile, which has no `USER` directive and so runs as root.
+- **Verified for real**: polled until the file system and all 3 mount targets genuinely reached
+  `available` state (not just assumed a success response meant ready).
+- No code changes needed - `DATA_DIR`/`DB_PATH`/Chroma's persist path are already driven by the
+  `ECHOLEDGER_DATA_DIR` env var from Phase 1; Session E just needs to set it to the EFS mount
+  path in the task definition.
+
+**Session D "done" checklist:**
+- [x] EFS file system created, encrypted, verified available
+- [x] Mount targets in all 3 subnets of the default VPC, verified available
+- [x] Access point scoped to a specific path + POSIX user matching the container
+- [x] Confirmed App Runner can't be used for this - Session E moves to ECS Fargate
+
 ## Session 8, continued — Build + push to ECR in CI (Phase 6, Session C of F)
 
 **Finally verifies the Dockerfile for real** - accepted as an open exception since Phase 1,
