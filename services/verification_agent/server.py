@@ -20,6 +20,7 @@ Run with: python -m services.verification_agent.server
 from __future__ import annotations
 
 import json
+import os
 from datetime import date
 
 import uvicorn
@@ -43,6 +44,12 @@ from echoledger.storage.db import connect
 
 HOST = "0.0.0.0"  # deliberate - needs to be reachable from outside the container
 PORT = 9998
+
+# The agent card advertises this URL to clients as where to actually send
+# messages - it must be a real address another host can connect to, which
+# BIND_HOST (0.0.0.0, above) is not. Deployed environments set this to the
+# Cloud Map DNS name; local dev falls back to localhost.
+PUBLIC_URL = os.getenv("ECHOLEDGER_AGENT_PUBLIC_URL", f"http://127.0.0.1:{PORT}")
 
 
 class LeakageJudgeExecutor(AgentExecutor):
@@ -105,7 +112,7 @@ def build_app() -> FastAPI:
         supported_interfaces=[
             AgentInterface(
                 protocol_binding="JSONRPC",
-                url=f"http://{HOST}:{PORT}",
+                url=PUBLIC_URL,
                 protocol_version="1.0",
             )
         ],
