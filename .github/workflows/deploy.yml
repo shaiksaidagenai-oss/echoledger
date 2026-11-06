@@ -18,15 +18,10 @@ jobs:
         include:
           - repository: echoledger
             dockerfile: Dockerfile
-            extra_build_flags: ""
           - repository: echoledger-verification-agent
             dockerfile: services/verification_agent/Dockerfile
-            extra_build_flags: ""
           - repository: echoledger-approval-handler
             dockerfile: services/approval_handler/Dockerfile
-            # Lambda container images require provenance attestation disabled - see
-            # https://docs.aws.amazon.com/lambda/latest/dg/python-image.html
-            extra_build_flags: "--provenance=false"
     steps:
       - uses: actions/checkout@v4
 
@@ -45,9 +40,8 @@ jobs:
           REGISTRY: ${{ steps.ecr-login.outputs.registry }}
           REPOSITORY: ${{ matrix.repository }}
           DOCKERFILE: ${{ matrix.dockerfile }}
-          EXTRA_BUILD_FLAGS: ${{ matrix.extra_build_flags }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          docker build $EXTRA_BUILD_FLAGS -f "$DOCKERFILE" -t "$REGISTRY/$REPOSITORY:$IMAGE_TAG" -t "$REGISTRY/$REPOSITORY:latest" .
+          docker build -f "$DOCKERFILE" -t "$REGISTRY/$REPOSITORY:$IMAGE_TAG" -t "$REGISTRY/$REPOSITORY:latest" .
           docker push "$REGISTRY/$REPOSITORY:$IMAGE_TAG"
           docker push "$REGISTRY/$REPOSITORY:latest"

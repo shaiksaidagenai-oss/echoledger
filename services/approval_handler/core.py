@@ -1,30 +1,26 @@
-"""Lambda handler behind the email approval links (Approve/Reject).
+"""Core logic behind the email approval links (Approve/Reject).
 
-Exposed via a Lambda Function URL - a free, auto-provisioned HTTPS
-endpoint, chosen specifically to avoid needing a purchased domain or an
-always-on load balancer for something that fires once a day at most.
-
-`process_approval` is the testable core (plain args in, dict out) - kept
-separate from `handler`, which just wires the real event/environment/DB
-connection into it, since AWS's handler(event, context) signature isn't
-itself convenient to unit test against.
+Framework-agnostic (plain args in, a dict describing an HTTP response
+out) so it's easy to unit test and reuse regardless of what actually
+serves it - originally written for a Lambda, now served via a small
+FastAPI app on ECS Fargate instead (the Lambda/API Gateway path hit an
+organizational restriction on publicly-invocable Lambda endpoints -
+see PROGRESS.md).
 
 Regenerate isn't handled here - re-running the LLM/judge pipeline needs
 the full app environment (A2A client, Claude), not something worth
-cramming into this small, EFS-mounted-but-otherwise-minimal function.
+cramming into this small, EFS-mounted-but-otherwise-minimal service.
 That stays a later step, likely triggering an ECS one-off task instead.
 """
 
 from __future__ import annotations
 
-import os
 import sqlite3
 from datetime import date
 from typing import Any
 
 from echoledger.approval_tokens import verify_token
-from echoledger.config import DB_PATH
-from echoledger.storage.db import connect, set_diary_approved
+from echoledger.storage.db import set_diary_approved
 
 _RESPONSE_HEADERS = {"Content-Type": "text/html"}
 
@@ -59,18 +55,3 @@ def process_approval(
 
     verb = "approved" if action == "approve" else "rejected"
     return _html_response(200, f"Arthur's diary entry for {date_str} has been {verb}.")
-
-
-def handler(event: dict[str, Any], context: object) -> dict[str, Any]:
-    params = event.get("queryStringParameters") or {}
-    conn = connect(DB_PATH)
-    try:
-        return process_approval(
-            params.get("date"),
-            params.get("action"),
-            params.get("sig"),
-            os.environ.get("APPROVAL_SIGNING_KEY"),
-            conn,
-        )
-    finally:
-        conn.close()

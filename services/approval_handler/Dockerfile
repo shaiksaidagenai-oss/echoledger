@@ -1,12 +1,16 @@
-# This function only needs a handful of echoledger's modules
-# (approval_tokens, config, storage/db, models), not the full package's
-# heavy dependency tree (chromadb, langgraph, a2a-sdk, anthropic, openai...)
-# - install just what those modules actually import, directly.
-FROM public.ecr.aws/lambda/python:3.11
+# Same base + minimal deps pattern as the other two services, running as
+# an ECS Fargate service with a public IP instead of Lambda - Lambda's
+# public invocation (Function URL and API Gateway both) turned out to be
+# blocked by an organizational restriction, see core.py's docstring.
+FROM python:3.11-slim
 
-RUN pip install pydantic python-dotenv boto3
+WORKDIR /app
 
-COPY src/echoledger ${LAMBDA_TASK_ROOT}/echoledger/
-COPY services/ ${LAMBDA_TASK_ROOT}/services/
+RUN pip install --no-cache-dir fastapi uvicorn pydantic python-dotenv boto3
 
-CMD ["services.approval_handler.handler.handler"]
+COPY src/echoledger ./src/echoledger/
+COPY services/ ./services/
+ENV PYTHONPATH=/app/src:/app
+
+EXPOSE 8080
+CMD ["uvicorn", "services.approval_handler.app:app", "--host", "0.0.0.0", "--port", "8080"]

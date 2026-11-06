@@ -2,7 +2,7 @@ import sqlite3
 from datetime import date
 
 import pytest
-from services.approval_handler.handler import process_approval
+from services.approval_handler.core import process_approval
 
 from echoledger.approval_tokens import make_token
 from echoledger.models import ArthurDiaryEntry
