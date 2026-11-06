@@ -1,13 +1,12 @@
-# AWS's own Lambda base image - same shared echoledger package as the other
-# two services (needs storage/db.py, config.py, approval_tokens.py), plus
-# this handler's own code.
+# This function only needs a handful of echoledger's modules
+# (approval_tokens, config, storage/db, models), not the full package's
+# heavy dependency tree (chromadb, langgraph, a2a-sdk, anthropic, openai...)
+# - install just what those modules actually import, directly.
 FROM public.ecr.aws/lambda/python:3.11
 
-COPY pyproject.toml ./
-COPY src/ ./src/
+RUN pip install pydantic python-dotenv boto3
 
-RUN pip install .
-
+COPY src/echoledger ${LAMBDA_TASK_ROOT}/echoledger/
 COPY services/ ${LAMBDA_TASK_ROOT}/services/
 
 CMD ["services.approval_handler.handler.handler"]
