@@ -181,26 +181,38 @@ F: verify + wrap up).
 Account `529470780389`, region `ap-southeast-2`. Local AWS CLI profile: `echoledger`
 (`aws login --profile echoledger` to refresh when expired).
 
-- ECR repos: `echoledger` and `echoledger-verification-agent`
+- ECR repos: `echoledger`, `echoledger-verification-agent`, `echoledger-approval-handler`
   (`529470780389.dkr.ecr.ap-southeast-2.amazonaws.com/<repo>`)
-- ECS cluster: `echoledger`; services: `echoledger` (task def family: `echoledger`) and
-  `verification-agent` (task def family: `echoledger-verification-agent`)
-- **Both services are currently scaled to 0** (`desiredCount: 0`) to stop compute billing
+- ECS cluster: `echoledger`; services: `echoledger` (task def family: `echoledger`),
+  `verification-agent` (task def family: `echoledger-verification-agent`), and
+  `approval-handler` (task def family: `echoledger-approval-handler`, port 8080, plain HTTP -
+  no HTTPS needed since email replaced WhatsApp and the signed token secures the action, not
+  the transport)
+- **All three services are currently scaled to 0** (`desiredCount: 0`) to stop compute billing
   between sessions - scale back up with `ecs:UpdateService(desiredCount=1)` before trying to
-  reach either one; the main app's public IP changes on every new task, re-fetch it via the
-  task's ENI. The verification agent is reachable internally at
+  reach any of them; each one's public IP changes on every new task, re-fetch it via the task's
+  ENI. The verification agent is reachable internally at
   `verification-agent.echoledger.local:9998` (Cloud Map private DNS, namespace
   `ns-ym3atae4sjdpyus4`) - only from the main app's security group, not the internet.
 - EFS file system: `fs-0bdb392946541090a`; access point: `fsap-0b16f15a72cbb283e`
-  (`/echoledger-data`, mounted at `/data` in both services' containers)
-- Secret: `echoledger/api-keys` (both API keys, one JSON secret, read by both services)
+  (`/echoledger-data`, mounted at `/data` in all three services' containers)
+- Secret: `echoledger/api-keys` (both API keys + `APPROVAL_SIGNING_KEY`, one JSON secret, read
+  by all three services that need it)
 - IAM roles: `echoledger-deploy` (broad, human/CLI use), `echoledger-github-actions` (OIDC,
-  CI only), `echoledger-ecs-execution` (ECS agent, both services), `echoledger-ecs-task`
-  (running container - EFS + Secrets Manager only, shared by both services)
+  CI only), `echoledger-ecs-execution` (ECS agent, all services), `echoledger-ecs-task` (main
+  app + verification agent - EFS + Secrets Manager), `echoledger-approval-handler-ecs`
+  (approval handler - same scope, its own role)
 - Security groups: `echoledger-service` (main app, inbound 8000 from internet),
   `echoledger-verification-agent` (inbound 9998 from the main app's SG only),
-  `echoledger-efs` (inbound 2049 from either of the above)
+  `echoledger-approval-handler` (inbound 8080 from the internet - named
+  `echoledger-approval-handler` but originally created for the abandoned Lambda attempt, reused
+  rather than recreated), `echoledger-efs` (inbound 2049 from any of the above)
 - Budget: `EchoLedger-Monthly`, $20/month, email alerts
+- **Lambda + API Gateway + Function URL were tried and abandoned** for the approval handler -
+  public invocation is blocked by what's almost certainly an organizational guardrail (direct
+  `lambda:Invoke` worked fine; both public paths didn't, with zero Lambda log group ever
+  created). Worth remembering before reaching for Lambda again on this account for anything
+  public-facing - direct-IP ECS Fargate is the proven-working pattern here instead.
 
 ### Session F — final verification + scale down
 
@@ -328,7 +340,21 @@ service, Cloud Map namespace, security group). Full details and the real deploye
 task called the deployed judge over Cloud Map DNS and got a genuine Claude-backed verdict back,
 and the judge's own task independently persisted its own database row.
 
-**Not done yet:** email-based approval, automating the daily ingest.
+### Step 2 - Email-based approval: IN PROGRESS (Session B of D done)
+
+Switched from WhatsApp to email (see the scope note above). Broken into sessions: A (SES setup,
+done), B (the approval endpoint, done), C (wire it into the actual draft-ready flow - send the
+real email with signed links), D (real end-to-end test).
+
+**Session B done**: the Approve/Reject endpoint is live on ECS Fargate (not Lambda - see the
+Phase 6 resource reference above for why). Signed HMAC tokens (`approval_tokens.py`,
+`services/approval_handler/`) verified correctly against real deployed infrastructure. Full
+story of the Lambda->ECS pivot and the two PowerShell 5.1 bugs hit along the way is in
+PROGRESS.md Session 10.
+
+**Not done yet:** wiring the email-send into the actual draft-ready flow (Session C), the real
+end-to-end test (Session D), Regenerate (deferred - needs the full LLM/judge pipeline, not
+something for this small endpoint), automating the daily ingest (Step 3).
 
 ### Key decision: 1926 data source
 

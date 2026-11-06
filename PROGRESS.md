@@ -1,5 +1,56 @@
 # Progress Log
 
+## Session 10, continued — Email approval, Session B: the approval endpoint
+
+**Real pivot mid-session: Lambda's public invocation turned out to be organizationally
+blocked.** Built the approval handler (Approve/Reject via signed links) against AWS Lambda +
+Function URL first, as planned - everything looked correctly configured (resource policy,
+`AuthType: NONE`, API Gateway integration all verified via the API), but every public
+invocation attempt (Function URL *and* a second attempt via API Gateway) returned an opaque
+error with **zero Lambda log group ever created** - meaning the request never reached the
+function at all. A direct `lambda:Invoke` call (bypassing both public paths) worked perfectly,
+returning the exact expected response - proving the function itself was correct and the block
+was specifically on public-facing invocation, almost certainly an organizational guardrail set
+at the management-account level (outside this project's reach, same boundary respected back in
+Phase 6 Session A).
+
+- **Pivoted to ECS Fargate** instead - the same pattern already proven to work for the other two
+  services. Split the Lambda-era code into `core.py` (pure, already-tested `process_approval()`
+  logic, framework-agnostic) and a new `app.py` (small FastAPI wrapper), so the pivot didn't
+  require rewriting or re-testing the actual approval logic, only how it's served.
+- New ECS service (`approval-handler`), reusing the established patterns: EFS mount for direct
+  database access, `ECHOLEDGER_SECRETS_ARN` for the signing key (added to the existing
+  `echoledger/api-keys` secret as a new field rather than a separate secret), a security group
+  allowing inbound 8080 from the internet (no HTTPS - no longer needed now that the approval
+  channel is email, not WhatsApp, and the token signature is what actually secures the action,
+  not the transport).
+- Cleaned up all the abandoned Lambda/API Gateway/Function-URL resources and their IAM role
+  immediately after confirming the pivot worked, rather than leaving dead infrastructure around.
+- Hit two more real "Modify Shared/Secret Resources" permission gates along the way (writing to
+  Secrets Manager; calling the live approval link, which changes shared data) - resolved by
+  explaining exactly what each action does and why before the user approved, same pattern as
+  the OIDC/git-push gates from Phase 6. Also found and fixed two real PowerShell 5.1
+  compatibility bugs in the process (`RandomNumberGenerator.Fill` and `-Encoding utf8NoBOM`
+  aren't available in this PowerShell version) - the first attempt silently failed without
+  stopping the script, caught only because of this project's habit of verifying state via the
+  API afterward rather than trusting a script's own printed "success" message.
+- **Verified for real**: hit the live public endpoint with a deliberately invalid signature
+  (chosen specifically as a low-risk test per the user's explicit preference - touches no real
+  data either way) and got back the exact expected `403 Forbidden - Invalid or tampered link.`,
+  confirming routing, EFS connectivity (the DB connection has to open successfully before
+  signature verification even runs), and the deployed code all work correctly together.
+  Confirmed in CloudWatch logs too.
+- 105 tests total, all green. Ruff and mypy clean (added `services/__init__.py` along the way -
+  mypy caught a real module-resolution ambiguity once two files in the same subpackage
+  cross-referenced each other by full dotted path, which the earlier single-file layout hadn't
+  exposed).
+
+**Session B "done" checklist:**
+- [x] Approve/Reject endpoint live and reachable (ECS Fargate, not Lambda)
+- [x] Signed tokens verified correctly against real deployed infrastructure
+- [x] Cleaned up abandoned Lambda/API Gateway resources
+- [ ] Regenerate action - still deferred, needs the full LLM/judge pipeline
+
 ## Session 10 — Email approval, Session A: SES setup
 
 **First step of Step 2 (remote approval) - switched from the original WhatsApp idea to email**
