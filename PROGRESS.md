@@ -1,5 +1,44 @@
 # Progress Log
 
+## Session 9 — Deploy the Verification agent to AWS
+
+**First step of the new post-roadmap phase** (agreed order: deploy Verification agent ->
+WhatsApp approval -> automate daily ingest). Gets Phase 5's A2A leakage judge running as its own
+live AWS service, not just locally.
+
+- New `services/verification_agent/Dockerfile` (the service isn't part of the main app's
+  installed package, so it needs `src/` for the shared `echoledger` package plus `services/`
+  for itself). `.github/workflows/deploy.yml` now builds and pushes both images via a matrix.
+- New ECR repo (`echoledger-verification-agent`) and ECS service, reusing the existing cluster
+  and both IAM roles (execution role for ECR/logs; task role already scoped to EFS + Secrets
+  Manager, exactly what this service also needs - no new roles required).
+- **AWS Cloud Map** private DNS namespace (`echoledger.local`) gives the service a stable
+  internal name (`verification-agent.echoledger.local`) instead of a changing IP every restart -
+  matters since the main app needs to find it reliably, and this is a direct prerequisite for
+  automating the daily pipeline later.
+- New internal-only security group - inbound 9998 allowed only from the main app's own security
+  group, not the internet (unlike the main app's read API, nothing public should reach this).
+- `verification_client.py`'s hardcoded `http://127.0.0.1:9998` became
+  `ECHOLEDGER_VERIFICATION_AGENT_URL` (env-configurable, same DI-adjacent pattern as everything
+  else), defaulting to localhost for local dev.
+- **Real bug, found only by actually testing the deployed round-trip** (not something any local
+  test could have caught, since local dev never exercises a mismatched bind-vs-advertise
+  address): the agent card's `supported_interfaces` URL reused the `0.0.0.0` *bind* address as
+  the *advertised* address clients should connect to - `0.0.0.0` isn't a real address another
+  host can connect to. The agent-card fetch itself succeeded (goes straight to the real DNS
+  name), but the follow-up message POST failed, since the client extracts its actual target URL
+  from the card it just fetched - a subtle two-step failure that only showed up by watching logs
+  from both sides. Fixed by splitting the bind host from a separate, configurable
+  `ECHOLEDGER_AGENT_PUBLIC_URL`.
+- **Verified for real, twice**: (1) a one-off task using the main app's image, run from a
+  separate ECS task, called `judge_via_a2a()` over Cloud Map DNS and got back a genuine
+  `VERDICT: pass` from Claude; (2) queried the shared EFS-backed database directly afterward and
+  found the `leakage_judgments` row the *verification agent's own task* had written - confirming
+  real, independent-service behavior across two separately-running ECS tasks, not an in-process
+  call dressed up to look like one (same discipline as Phase 5's original local verification).
+- Scaled both services back to 0 afterward (confirmed `runningCount` reached 0 for both, not
+  just that the API calls succeeded) - no change to the cost-control habit from Phase 6.
+
 ## Session 8, continued — Final verification + scale down (Phase 6, Session F of F — DONE)
 
 **Closes out Phase 6.** Checked every piece together in one pass rather than trusting each

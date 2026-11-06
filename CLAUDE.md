@@ -181,17 +181,25 @@ F: verify + wrap up).
 Account `529470780389`, region `ap-southeast-2`. Local AWS CLI profile: `echoledger`
 (`aws login --profile echoledger` to refresh when expired).
 
-- ECR repo: `echoledger` (`529470780389.dkr.ecr.ap-southeast-2.amazonaws.com/echoledger`)
-- ECS cluster: `echoledger`; service: `echoledger` (task def family: `echoledger`)
-- **Service is currently scaled to 0** (`desiredCount: 0`) to stop compute billing between
-  sessions - scale back up with `ecs:UpdateService(desiredCount=1)` before trying to reach the
-  live endpoint again; its public IP changes on every new task, re-fetch it via the task's ENI.
+- ECR repos: `echoledger` and `echoledger-verification-agent`
+  (`529470780389.dkr.ecr.ap-southeast-2.amazonaws.com/<repo>`)
+- ECS cluster: `echoledger`; services: `echoledger` (task def family: `echoledger`) and
+  `verification-agent` (task def family: `echoledger-verification-agent`)
+- **Both services are currently scaled to 0** (`desiredCount: 0`) to stop compute billing
+  between sessions - scale back up with `ecs:UpdateService(desiredCount=1)` before trying to
+  reach either one; the main app's public IP changes on every new task, re-fetch it via the
+  task's ENI. The verification agent is reachable internally at
+  `verification-agent.echoledger.local:9998` (Cloud Map private DNS, namespace
+  `ns-ym3atae4sjdpyus4`) - only from the main app's security group, not the internet.
 - EFS file system: `fs-0bdb392946541090a`; access point: `fsap-0b16f15a72cbb283e`
-  (`/echoledger-data`, mounted at `/data` in the container)
-- Secret: `echoledger/api-keys` (both API keys, one JSON secret)
+  (`/echoledger-data`, mounted at `/data` in both services' containers)
+- Secret: `echoledger/api-keys` (both API keys, one JSON secret, read by both services)
 - IAM roles: `echoledger-deploy` (broad, human/CLI use), `echoledger-github-actions` (OIDC,
-  CI only), `echoledger-ecs-execution` (ECS agent), `echoledger-ecs-task` (running container -
-  EFS + Secrets Manager only)
+  CI only), `echoledger-ecs-execution` (ECS agent, both services), `echoledger-ecs-task`
+  (running container - EFS + Secrets Manager only, shared by both services)
+- Security groups: `echoledger-service` (main app, inbound 8000 from internet),
+  `echoledger-verification-agent` (inbound 9998 from the main app's SG only),
+  `echoledger-efs` (inbound 2049 from either of the above)
 - Budget: `EchoLedger-Monthly`, $20/month, email alerts
 
 ### Session F — final verification + scale down
@@ -294,6 +302,26 @@ service to 0** (confirmed `runningCount` actually reached 0, not just that the A
 succeeded) to stop Fargate compute billing between sessions - EFS storage, ECR images, secrets,
 IAM roles, and the task definition all persist untouched, so resuming is one
 `ecs:UpdateService(desiredCount=1)` call away, not a rebuild.
+
+## Post-roadmap — remote approval + automated publishing: IN PROGRESS
+
+The original 6-phase roadmap is complete. User's next direction, in this order: (1) deploy the
+Verification agent to AWS, (2) WhatsApp-based human approval, (3) automate the daily ingest
+pipeline. These are deliberately sequenced, not independent - the daily pipeline can't run
+unattended until there's both a deployed judge *and* a way to approve remotely; WhatsApp
+approval is what actually unblocks automation, not a separate nice-to-have. See
+`project_whatsapp_approval_idea` in memory for the original ask.
+
+### Step 1 - Verification agent deployed to AWS: DONE (2026-11-06)
+
+See the Phase 6 "Live resource reference" above for the actual resources (ECR repo, ECS
+service, Cloud Map namespace, security group). Full details and the real deployed bug found
+(agent card advertising an unconnectable `0.0.0.0` URL, fixed via a separate
+`ECHOLEDGER_AGENT_PUBLIC_URL`) are in PROGRESS.md Session 9. Verified for real: a separate ECS
+task called the deployed judge over Cloud Map DNS and got a genuine Claude-backed verdict back,
+and the judge's own task independently persisted its own database row.
+
+**Not done yet:** WhatsApp approval, automating the daily ingest.
 
 ### Key decision: 1926 data source
 
