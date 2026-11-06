@@ -1,5 +1,46 @@
 # Progress Log
 
+## Session 8, continued — Build + push to ECR in CI (Phase 6, Session C of F)
+
+**Finally verifies the Dockerfile for real** - accepted as an open exception since Phase 1,
+since `docker build` hangs indefinitely on this machine (diagnosed back then as local
+VPN/Fortinet interference, not a Dockerfile problem). Building in GitHub's clean network
+sidesteps that entirely instead of trying to fix the local environment.
+
+- Created the ECR repository (`echoledger`, scan-on-push enabled).
+- Set up GitHub Actions -> AWS auth via **OIDC** (chosen over a stored access key, user's
+  explicit call) - an IAM OIDC identity provider for `token.actions.githubusercontent.com`,
+  plus a role (`echoledger-github-actions`) trusted only for this repo's `master` branch,
+  holding `AmazonEC2ContainerRegistryPowerUser`. No AWS secret stored in GitHub at all.
+- New `.github/workflows/deploy.yml`: builds the existing Dockerfile and pushes to ECR
+  (tagged with both the commit SHA and `latest`) on every push to `master`.
+- **Real bug, found only by actually running it against the real GitHub OIDC token (not
+  documented anywhere I checked beforehand)**: GitHub's OIDC `sub` claim is no longer the
+  plain `repo:OWNER/REPO:ref:refs/heads/BRANCH` format most docs/tutorials show - GitHub now
+  appends immutable numeric IDs after the owner and repo names
+  (`repo:OWNER@<owner_id>/REPO@<repo_id>:ref:refs/heads/BRANCH`), a newer anti-rename-hijack
+  protection. The trust policy's exact-format `sub` condition silently never matched, failing
+  with a generic `AccessDenied: Not authorized to perform sts:AssumeRoleWithWebIdentity` - no
+  indication of *why*. Diagnosed via **CloudTrail** (`cloudtrail:LookupEvents` for
+  `AssumeRoleWithWebIdentity`), which shows AWS's actual-received `sub` claim verbatim - far
+  more informative than the GitHub Actions log, which only shows the generic denial. Fixed by
+  widening the trust policy's `StringLike` condition to
+  `repo:shaiksaidagenai-oss@*/echoledger@*:ref:refs/heads/master`.
+- Also hit (and worked around): `gh` CLI isn't installed on this machine, and GitHub's job-log
+  download API requires more auth than an unauthenticated request provides even for checking a
+  single failed step - used the public (unauthenticated) `workflow runs`/`jobs` list endpoints
+  instead, which gave enough signal (step-level pass/fail + timing) alongside CloudTrail to
+  diagnose without ever downloading full logs.
+- **Verified for real**: `ecr:DescribeImages` shows the actual pushed image (223.3 MB, tagged
+  with the commit SHA + `latest`) - the Dockerfile genuinely builds and runs `pip install .`
+  successfully, for the first time since Phase 1.
+
+**Session C "done" checklist:**
+- [x] ECR repository created
+- [x] GitHub Actions authenticates to AWS via OIDC, no stored secret
+- [x] Dockerfile verified to actually build (first time, via CI not local)
+- [x] Image confirmed present in ECR for real
+
 ## Session 8, continued — Secrets migration to AWS Secrets Manager (Phase 6, Session B of F)
 
 **Finishes the secrets piece of Phase 6.** Moved `ANTHROPIC_API_KEY`/`OPENAI_API_KEY` out of

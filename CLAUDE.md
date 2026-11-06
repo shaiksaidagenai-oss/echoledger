@@ -172,9 +172,20 @@ LangGraph + A2A + a new data-model change all at once would be too much new surf
 Target deliverable: EchoLedger containerized and running in AWS, with a persistent data store,
 secrets out of `.env`, a budget alarm, and an automated (GitHub Actions) deploy pipeline.
 
-**Status: Sessions A-B of F done (2026-11-06).** Broken into small sessions (A: account safety
+**Status: Sessions A-C of F done (2026-11-06).** Broken into small sessions (A: account safety
 net, B: secrets migration, C: build image in CI, D: persistent storage, E: compute + go live,
 F: verify + wrap up).
+
+- **Session C - build + push to ECR in CI**: finally verifies the Dockerfile for real (open
+  exception since Phase 1 - local `docker build` hangs on this machine's VPN setup; building in
+  GitHub's clean network sidesteps it). `.github/workflows/deploy.yml` builds and pushes to a
+  new ECR repo (`echoledger`) on every push to `master`, authenticating via **OIDC** (no stored
+  AWS secret in GitHub - a role trusted only for this repo's `master` branch). Real bug: GitHub's
+  OIDC `sub` claim now appends immutable numeric IDs after the owner/repo names
+  (`repo:OWNER@id/REPO@id:ref:...`, not the plain format most docs show) - a newer
+  anti-rename-hijack protection, diagnosed via CloudTrail (shows AWS's actual-received claim)
+  rather than the uninformative generic `AccessDenied` in the Actions log. Confirmed via
+  `ecr:DescribeImages` that a real 223 MB image is genuinely in ECR.
 
 - **Session B - secrets migration:** `ANTHROPIC_API_KEY`/`OPENAI_API_KEY` now also live in AWS
   Secrets Manager (`echoledger/api-keys`, one JSON secret for both). `config.py`'s
