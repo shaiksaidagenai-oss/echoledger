@@ -172,9 +172,20 @@ LangGraph + A2A + a new data-model change all at once would be too much new surf
 Target deliverable: EchoLedger containerized and running in AWS, with a persistent data store,
 secrets out of `.env`, a budget alarm, and an automated (GitHub Actions) deploy pipeline.
 
-**Status: Sessions A-D of F done (2026-11-06).** Broken into small sessions (A: account safety
+**Status: Sessions A-E of F done (2026-11-06).** Broken into small sessions (A: account safety
 net, B: secrets migration, C: build image in CI, D: persistent storage, E: compute + go live,
 F: verify + wrap up).
+
+- **Session E - compute + go live**: EchoLedger is genuinely running in AWS. Dockerfile now
+  defaults to serving the FastAPI API (`uvicorn`), CLI still reachable via command override for
+  a future scheduled ingest task (not built yet - deliberately out of scope this session). ECS
+  Fargate cluster/service (`echoledger`), two IAM roles (execution role for the ECS agent;
+  narrowly-scoped task role for the running container's Secrets Manager + EFS access), EFS
+  mounted at `/data`. No ALB/NAT gateway - the task gets a public IP directly, good enough for a
+  solo project at this stage. **Verified for real**: hit the live public endpoint, got genuine
+  `200 OK` responses, confirmed in CloudWatch logs. Data is empty, which is correct - this
+  environment's storage hasn't been populated with the real archive yet (ingest is separate from
+  deployment).
 
 - **Session D - persistent storage**: real, verified finding that changes Session E - App
   Runner (originally assumed compute target) is explicitly stateless per AWS's own docs, no EFS

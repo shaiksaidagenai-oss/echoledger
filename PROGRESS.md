@@ -1,5 +1,41 @@
 # Progress Log
 
+## Session 8, continued — Compute + go live on ECS Fargate (Phase 6, Session E of F)
+
+**EchoLedger is genuinely running in AWS now, not just containerized.** Closes the gap found in
+Session D (App Runner can't do what we need).
+
+- **Dockerfile changed**: the container now defaults to serving the FastAPI read API via
+  uvicorn (`CMD ["uvicorn", "echoledger.api.app:app", ...]`), not just running the CLI. The CLI
+  (`fetch`/`show`/`scorecard`) is still reachable by overriding the container command - useful
+  later for a scheduled one-off ingest task, deliberately not built this session (scope: get the
+  read API live, not the daily ingest pipeline).
+- Created the ECS pieces: a Fargate cluster (`echoledger`), two IAM roles - an **execution
+  role** (standard `AmazonECSTaskExecutionRolePolicy`, used by the ECS agent itself to pull
+  from ECR / write logs) and a separate **task role** (what the *running container* assumes,
+  scoped narrowly to `secretsmanager:GetSecretValue` on our one secret plus
+  `elasticfilesystem:ClientMount/ClientWrite/ClientRootAccess` restricted via a condition to our
+  specific access point) - a CloudWatch log group, and a task definition wiring the EFS volume
+  from Session D to `/data` (matching `ECHOLEDGER_DATA_DIR`) alongside
+  `ECHOLEDGER_SECRETS_ARN` for Session B's secrets loader.
+- No ALB - the Fargate task gets a public IP directly (no NAT gateway either, same cost
+  reasoning as Session D) with a security group allowing inbound 8000 from anywhere. Good
+  enough for a solo project at this stage; revisit with an ALB + custom domain + HTTPS if this
+  ever needs to look more "production."
+- **Verified for real, end to end**: registered the task definition, created the service,
+  polled until the task reached `RUNNING`, pulled its public IP from the ENI, and hit it with a
+  real `curl` - got genuine `200 OK` JSON responses from `/today` and `/scorecard`. Confirmed
+  CloudWatch logs show the real uvicorn startup sequence and both real requests landing. Data
+  came back empty, which is correct and expected - this environment's EFS volume starts as a
+  fresh, empty filesystem; it hasn't been populated with the real archive yet (that's ingest,
+  not deployment - a natural next step, not required for "the deployment mechanics work").
+
+**Session E "done" checklist:**
+- [x] ECS Fargate cluster + service running the real pushed image
+- [x] EFS volume mounted, Secrets Manager wired via the task role
+- [x] Hit the live public endpoint for real, got a correct (if empty) response
+- [x] CloudWatch logs confirmed flowing
+
 ## Session 8, continued — Persistent storage via EFS (Phase 6, Session D of F)
 
 **Changes the Session E plan.** Before creating anything, checked AWS's own docs for whether
