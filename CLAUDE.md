@@ -306,11 +306,18 @@ IAM roles, and the task definition all persist untouched, so resuming is one
 ## Post-roadmap — remote approval + automated publishing: IN PROGRESS
 
 The original 6-phase roadmap is complete. User's next direction, in this order: (1) deploy the
-Verification agent to AWS, (2) WhatsApp-based human approval, (3) automate the daily ingest
-pipeline. These are deliberately sequenced, not independent - the daily pipeline can't run
-unattended until there's both a deployed judge *and* a way to approve remotely; WhatsApp
-approval is what actually unblocks automation, not a separate nice-to-have. See
-`project_whatsapp_approval_idea` in memory for the original ask.
+Verification agent to AWS, (2) remote (email-based) human approval, (3) automate the daily
+ingest pipeline. These are deliberately sequenced, not independent - the daily pipeline can't
+run unattended until there's both a deployed judge *and* a way to approve remotely; email
+approval is what actually unblocks automation, not a separate nice-to-have.
+
+**Approval channel decided 2026-11-06: email, not WhatsApp** (the original ask - see
+`project_whatsapp_approval_idea` in memory). WhatsApp needs a Meta-reviewed message template
+before the first send (usually fast, up to 24-48h worst case) and templates can't hold the full
+diary text anyway - the user would still tap through to a web page to read it. Email has no
+review process and the draft fits directly in the email body. HTTPS for the approval links
+does NOT require buying a domain either way - a Lambda Function URL provides one free. The
+LinkedIn-publishing half of the original idea is unchanged, still planned for later.
 
 ### Step 1 - Verification agent deployed to AWS: DONE (2026-11-06)
 
@@ -321,7 +328,7 @@ service, Cloud Map namespace, security group). Full details and the real deploye
 task called the deployed judge over Cloud Map DNS and got a genuine Claude-backed verdict back,
 and the judge's own task independently persisted its own database row.
 
-**Not done yet:** WhatsApp approval, automating the daily ingest.
+**Not done yet:** email-based approval, automating the daily ingest.
 
 ### Key decision: 1926 data source
 
