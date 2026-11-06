@@ -1,5 +1,38 @@
 # Progress Log
 
+## Session 8, continued — Populate the live environment with real data
+
+**Not part of the original Session E scope - a follow-up once the user saw the live API
+returning empty data and wanted to see it working for real.**
+
+- First considered running a genuine live `fetch` against the deployed environment, with
+  approval relayed through chat. Hit two real gaps worth remembering: (1) the A2A Verification
+  agent (Phase 5) isn't deployed to AWS at all, only ever run locally - the full pipeline would
+  fail on that before approval even came up; (2) true interactive terminal approval through an
+  ECS Exec session isn't something achievable with the current tooling (no way to hold a live
+  back-and-forth mid-session) - didn't want to fake it or skip approval, so asked the user how
+  to proceed instead of guessing.
+- **User chose the simpler, still-correct option**: bridge the local database (already full of
+  genuinely human-approved diary entries from earlier sessions) onto the live EFS volume,
+  instead of generating fresh content in the cloud.
+- Local DB turned out to be 344 MB - too large for a terminal/SSM pipe to carry reliably. Used
+  **S3 as a bootstrap bridge** instead: uploaded the local file directly via the AWS CLI, then
+  ran a one-off, **non-interactive** ECS task (`RunTask` with a command override, no Exec
+  needed) that downloaded it straight onto the EFS mount via `boto3` - already in the image
+  since Session B. Granted the task role scoped, temporary `s3:GetObject` access to just that
+  one object, then removed it afterward.
+- **Verified for real, byte-for-byte**: the download task logged `downloaded bytes: 344395776`,
+  matching the local file's exact size. Hit the live API again - `/archive/2026-11-05` now
+  returns a genuine, previously-approved Arthur diary entry about the 1926 Tombs prison
+  tragedy, Pittsburgh banking news, and more, with `diary_pending: false`. Today's own date
+  correctly still shows `diary_pending: true` (that entry genuinely hasn't been approved) -
+  the approval-gating logic is working correctly in the live environment, not just locally.
+- Cleaned up the bootstrap S3 bucket and the temporary IAM policy immediately after - the task
+  role is back to its original, narrower scope (EFS + Secrets Manager only).
+- Noted a pre-existing, unrelated cosmetic issue: some stored diary text has mangled UTF-8
+  (mis-encoded em-dashes) - present in the original data itself, not introduced by this
+  transfer (byte count matched exactly). Worth a cleanup pass sometime, not urgent.
+
 ## Session 8, continued — Compute + go live on ECS Fargate (Phase 6, Session E of F)
 
 **EchoLedger is genuinely running in AWS now, not just containerized.** Closes the gap found in
