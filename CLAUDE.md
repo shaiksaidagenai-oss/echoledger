@@ -167,6 +167,46 @@ LangGraph + A2A + a new data-model change all at once would be too much new surf
   `a2a.server.agent_execution`).
 - 92 tests total, all green. Ruff and mypy clean.
 
+## Phase 6 — AWS deployment: IN PROGRESS
+
+Target deliverable: EchoLedger containerized and running in AWS, with a persistent data store,
+secrets out of `.env`, a budget alarm, and an automated (GitHub Actions) deploy pipeline.
+
+**Status: Session A of F done (2026-11-06).** Broken into small sessions (A: account safety net,
+B: secrets migration, C: build image in CI, D: persistent storage, E: compute + go live,
+F: verify + wrap up).
+
+- **AWS account structure, verified for real**: this account (`529470780389`, "Hello World") is
+  an AWS Organization member account managed through **IAM Identity Center** - the login
+  identity ("Shaik") federates into a role per account, rather than a classic root
+  email/password. Root genuinely has no password and no MFA (`AccountPasswordPresent: 0`,
+  `AccountMFAEnabled: 0` via `iam:GetAccountSummary`) - not a gap to fix, just how this account
+  type works; nothing can log in as root here, so it isn't a real attack surface. Deliberately
+  did NOT chase Identity-Center-level MFA either - that instance lives in a separate
+  organization-management account outside this project's scope.
+- **Real, verified budget alarm**: the account-creation flow's "$20/month spend limit" does NOT
+  show up in AWS's standard Budgets API (confirmed via `budgets:DescribeBudgets` returning
+  empty) - created a real, standard AWS Budget instead (`EchoLedger-Monthly`, $20 USD/month,
+  email alerts at 80%/100% actual + forecasted-over-100%), confirmed `HealthStatus: HEALTHY`.
+  This is what actually satisfies the non-negotiable budget-alarm-before-deployment rule.
+- **Agent Toolkit for AWS** (official AWS MCP server) installed so Claude acts on AWS directly
+  via tool calls (`mcp__aws-mcp__aws___run_script`, using `call_boto3`) instead of narrating
+  console steps. Two real setup bugs: (1) its MCP server launches via `uvx`, needing the
+  separate `uv` package manager - missing on this machine, caused silent `CONNECTION_CLOSED`
+  until installed; (2) the generated MCP config was missing `AWS_MCP_PROXY_PROFILES`, so it
+  silently defaulted to this machine's pre-existing, unrelated `default` AWS profile (a
+  different real account, likely an office one) - caught only by checking
+  `sts:GetCallerIdentity` before acting, not by assuming the profile was right. Fixed by pinning
+  `AWS_MCP_PROXY_PROFILES=echoledger` in `.claude.json`'s `aws-mcp` entry.
+- **Standing rule (saved to memory)**: always verify the exact AWS account number
+  (`529470780389`) before any AWS action in this project, every session - this machine holds
+  other real AWS credentials that must never be touched by accident.
+- Created IAM user `echoledger-deploy` with `PowerUserAccess` (broad access, user's explicit
+  call, to narrow later once exact Phase 6 permission needs are known). No access key yet -
+  deferred until Session C actually needs one for GitHub Actions, at which point it goes
+  straight into GitHub's secrets store, never displayed in chat - same rule as every other
+  secret in this project.
+
 ### Key decision: 1926 data source
 
 **Decided: US, "American Stories" dataset on Hugging Face**

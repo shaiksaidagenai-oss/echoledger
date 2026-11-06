@@ -1,5 +1,56 @@
 # Progress Log
 
+## Session 8 — AWS account setup (Phase 6, Session A of F)
+
+**Not Phase 6 complete - just the account safety net.** First real session on Phase 6
+(AWS deployment, now the final phase after MCP was dropped from the roadmap - see CLAUDE.md's
+Scope decision note from the prior session).
+
+- Created the AWS account via AWS's newer "Projects" signup experience - turned out to be
+  structured very differently from a classic single-root-user account: it's an **AWS
+  Organization managed through IAM Identity Center**, with the login identity ("Shaik")
+  federating into per-account roles rather than a traditional root email/password. Took a long
+  back-and-forth (documented for the record, not repeated here) to figure this out - including
+  discovering IAM itself starts in a restricted mode on these accounts until you click
+  "Activate advanced features" (free, not the $20 charge it was first mistaken for - that was
+  actually the next screen's *self-imposed monthly spend limit*, unrelated and also free to set).
+- **Real, verified finding:** root has no password and no MFA (`AccountPasswordPresent: 0`,
+  `AccountMFAEnabled: 0` via `iam:GetAccountSummary`) - not a misconfiguration, just how this
+  account type works. Root isn't a real attack surface here since nothing can log in as it.
+  Decided not to chase Identity-Center-level MFA either - that instance lives in a separate
+  "management" account outside this project's scope, not in EchoLedger's own account.
+- **Real, verified finding:** the "$20/month spend limit" set during account creation does
+  **not** show up in AWS's standard Budgets API (`budgets:DescribeBudgets` came back empty) -
+  it's specific to this new account UI, not something verifiable through normal means. Created a
+  real, standard AWS Budget instead (`EchoLedger-Monthly`, $20 USD/month, email alerts at 80%
+  actual / 100% actual / forecasted-over-100%) - confirmed via `DescribeBudgets` showing
+  `HealthStatus: HEALTHY`. This is what actually satisfies the non-negotiable budget-alarm rule,
+  verifiably.
+- Installed the **Agent Toolkit for AWS** (official AWS MCP server) so Claude can act on AWS
+  directly via tool calls instead of narrating console steps. Two real setup bugs hit along the
+  way: (1) the toolkit's MCP server launches via `uvx`, which needs the separate `uv` package
+  manager - not installed on this machine, silently caused `CONNECTION_CLOSED` until installed;
+  (2) the generated MCP config was missing `AWS_MCP_PROXY_PROFILES`, so the server silently fell
+  back to this machine's pre-existing `default` AWS profile - a **different, unrelated AWS
+  account** (`078809709728`, likely an office account) - caught only by checking
+  `sts:GetCallerIdentity` before taking any action, not by assuming the profile was right.
+  Fixed by patching `.claude.json`'s `aws-mcp` entry to pin `AWS_MCP_PROXY_PROFILES=echoledger`.
+- **New standing rule, now saved to memory**: always verify the exact AWS account number
+  (`529470780389`) before any AWS action in this project, every session - this machine has
+  other real AWS credentials on it that must never be touched by accident.
+- Created `echoledger-deploy`, an IAM user with `PowerUserAccess` (broad access, user's explicit
+  call - narrow later once Phase 6's exact permission needs are known). No access key generated
+  yet - deferred until Session C actually needs one for GitHub Actions, at which point it goes
+  straight into GitHub's secrets, never displayed in chat.
+
+**Session A "done" checklist:**
+- [x] AWS account verified as EchoLedger's own (529470780389, not the office account)
+- [x] Advanced IAM features activated
+- [x] Real, verifiable budget alarm ($20/month, email notifications)
+- [x] IAM deployment user created (`echoledger-deploy`, PowerUserAccess)
+- [ ] Root MFA - decided not applicable (no root password exists on this account type)
+- [ ] Access key for `echoledger-deploy` - deferred to Session C (GitHub Actions)
+
 ## Session 7 — Verification agent over A2A (Phase 5, part 2 of 2 — DONE)
 
 **Finishes Phase 5.** Pulled the leakage judge out of the in-process LangGraph workflow into
