@@ -1,5 +1,33 @@
 # Progress Log
 
+## Session 8, continued — Final verification + scale down (Phase 6, Session F of F — DONE)
+
+**Closes out Phase 6.** Checked every piece together in one pass rather than trusting each
+session's individual verification to still hold on its own:
+
+- Full local toolchain (ruff/mypy/pytest) - still clean after all of this phase's Dockerfile,
+  `config.py`, and dependency changes.
+- Budget `HEALTHY`, 6 images in ECR, ECS service `1/1 running`, EFS `available`, secret present
+  - then hit the live API one more time for real (`/scorecard` → `200 OK`) before touching
+  anything, confirming the whole stack was genuinely still working together.
+- **Scaled the service to 0** (`ecs:UpdateService(desiredCount=0)`), and - matching this
+  project's "verify, don't assume a success response means done" habit - polled until
+  `runningCount` actually reached 0, not just that the API call returned successfully. EFS
+  storage, ECR images, secrets, and IAM roles all persist untouched; resuming later is one
+  `ecs:UpdateService(desiredCount=1)` call away, not a rebuild.
+- Rewrote CLAUDE.md's Phase 6 section into a clean, forward-chronological (A through F) final
+  summary with a "live resource reference" block (account, region, resource names/IDs, and a
+  note that the service is currently scaled to 0) so a future session can pick this back up
+  without re-discovering everything from scratch.
+
+**Phase 6 "done" checklist - all six sessions:**
+- [x] A: AWS account verified, real budget alarm, Agent Toolkit for AWS connected
+- [x] B: API keys migrated to Secrets Manager, app reads them when deployed
+- [x] C: Dockerfile verified to build for real, pushed to ECR via CI (OIDC, no stored secret)
+- [x] D: EFS persistent storage created and verified available
+- [x] E: ECS Fargate service live, hit over real HTTP, populated with real approved data
+- [x] F: everything re-verified together, service scaled down for cost control between sessions
+
 ## Session 8, continued — Populate the live environment with real data
 
 **Not part of the original Session E scope - a follow-up once the user saw the live API

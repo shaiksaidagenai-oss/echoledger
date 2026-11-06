@@ -167,84 +167,133 @@ LangGraph + A2A + a new data-model change all at once would be too much new surf
   `a2a.server.agent_execution`).
 - 92 tests total, all green. Ruff and mypy clean.
 
-## Phase 6 — AWS deployment: IN PROGRESS
+## Phase 6 — AWS deployment: DONE (2026-11-06)
 
 Target deliverable: EchoLedger containerized and running in AWS, with a persistent data store,
 secrets out of `.env`, a budget alarm, and an automated (GitHub Actions) deploy pipeline.
 
-**Status: Sessions A-E of F done (2026-11-06).** Broken into small sessions (A: account safety
-net, B: secrets migration, C: build image in CI, D: persistent storage, E: compute + go live,
+**Status: all sessions A-F done.** Broken into small sessions (A: account safety net,
+B: secrets migration, C: build image in CI, D: persistent storage, E: compute + go live,
 F: verify + wrap up).
 
-- **Session E - compute + go live**: EchoLedger is genuinely running in AWS. Dockerfile now
-  defaults to serving the FastAPI API (`uvicorn`), CLI still reachable via command override for
-  a future scheduled ingest task (not built yet - deliberately out of scope this session). ECS
-  Fargate cluster/service (`echoledger`), two IAM roles (execution role for the ECS agent;
-  narrowly-scoped task role for the running container's Secrets Manager + EFS access), EFS
-  mounted at `/data`. No ALB/NAT gateway - the task gets a public IP directly, good enough for a
-  solo project at this stage. **Verified for real**: hit the live public endpoint, got genuine
-  `200 OK` responses, confirmed in CloudWatch logs. Data is empty, which is correct - this
-  environment's storage hasn't been populated with the real archive yet (ingest is separate from
-  deployment).
+### Live resource reference (so a future session doesn't have to rediscover these)
 
-- **Session D - persistent storage**: real, verified finding that changes Session E - App
-  Runner (originally assumed compute target) is explicitly stateless per AWS's own docs, no EFS
-  support. **Session E will use ECS Fargate instead**, which supports EFS volumes natively.
-  Created the EFS file system + an access point scoped to `/echoledger-data` (POSIX uid/gid
-  `0:0`, matching the Dockerfile's root user) + mount targets in the default VPC's 3 subnets,
-  all confirmed `available`. No app code changes needed - `ECHOLEDGER_DATA_DIR` already drives
-  `DATA_DIR`/`DB_PATH`/Chroma's path since Phase 1; Session E just points it at the EFS mount.
+Account `529470780389`, region `ap-southeast-2`. Local AWS CLI profile: `echoledger`
+(`aws login --profile echoledger` to refresh when expired).
 
-- **Session C - build + push to ECR in CI**: finally verifies the Dockerfile for real (open
-  exception since Phase 1 - local `docker build` hangs on this machine's VPN setup; building in
-  GitHub's clean network sidesteps it). `.github/workflows/deploy.yml` builds and pushes to a
-  new ECR repo (`echoledger`) on every push to `master`, authenticating via **OIDC** (no stored
-  AWS secret in GitHub - a role trusted only for this repo's `master` branch). Real bug: GitHub's
-  OIDC `sub` claim now appends immutable numeric IDs after the owner/repo names
-  (`repo:OWNER@id/REPO@id:ref:...`, not the plain format most docs show) - a newer
-  anti-rename-hijack protection, diagnosed via CloudTrail (shows AWS's actual-received claim)
-  rather than the uninformative generic `AccessDenied` in the Actions log. Confirmed via
-  `ecr:DescribeImages` that a real 223 MB image is genuinely in ECR.
+- ECR repo: `echoledger` (`529470780389.dkr.ecr.ap-southeast-2.amazonaws.com/echoledger`)
+- ECS cluster: `echoledger`; service: `echoledger` (task def family: `echoledger`)
+- **Service is currently scaled to 0** (`desiredCount: 0`) to stop compute billing between
+  sessions - scale back up with `ecs:UpdateService(desiredCount=1)` before trying to reach the
+  live endpoint again; its public IP changes on every new task, re-fetch it via the task's ENI.
+- EFS file system: `fs-0bdb392946541090a`; access point: `fsap-0b16f15a72cbb283e`
+  (`/echoledger-data`, mounted at `/data` in the container)
+- Secret: `echoledger/api-keys` (both API keys, one JSON secret)
+- IAM roles: `echoledger-deploy` (broad, human/CLI use), `echoledger-github-actions` (OIDC,
+  CI only), `echoledger-ecs-execution` (ECS agent), `echoledger-ecs-task` (running container -
+  EFS + Secrets Manager only)
+- Budget: `EchoLedger-Monthly`, $20/month, email alerts
 
-- **Session B - secrets migration:** `ANTHROPIC_API_KEY`/`OPENAI_API_KEY` now also live in AWS
-  Secrets Manager (`echoledger/api-keys`, one JSON secret for both). `config.py`'s
-  `_load_secrets_from_aws()` only activates when `ECHOLEDGER_SECRETS_ARN` is set (never true
-  locally) - populates `os.environ` via `setdefault` before the Anthropic/OpenAI SDKs read their
-  keys, same DI pattern as every external API call in this project. Verified for real against
-  the actual secret (not just a mocked client). Real local-only snag: the `echoledger` CLI
-  profile's `aws login` credential type needs `botocore[crt]`, which plain `boto3` doesn't pull
-  in - won't affect the deployed container, which uses an IAM role instead.
+### Session F — final verification + scale down
 
-- **AWS account structure, verified for real**: this account (`529470780389`, "Hello World") is
-  an AWS Organization member account managed through **IAM Identity Center** - the login
-  identity ("Shaik") federates into a role per account, rather than a classic root
-  email/password. Root genuinely has no password and no MFA (`AccountPasswordPresent: 0`,
-  `AccountMFAEnabled: 0` via `iam:GetAccountSummary`) - not a gap to fix, just how this account
-  type works; nothing can log in as root here, so it isn't a real attack surface. Deliberately
-  did NOT chase Identity-Center-level MFA either - that instance lives in a separate
-  organization-management account outside this project's scope.
-- **Real, verified budget alarm**: the account-creation flow's "$20/month spend limit" does NOT
-  show up in AWS's standard Budgets API (confirmed via `budgets:DescribeBudgets` returning
-  empty) - created a real, standard AWS Budget instead (`EchoLedger-Monthly`, $20 USD/month,
-  email alerts at 80%/100% actual + forecasted-over-100%), confirmed `HealthStatus: HEALTHY`.
-  This is what actually satisfies the non-negotiable budget-alarm-before-deployment rule.
-- **Agent Toolkit for AWS** (official AWS MCP server) installed so Claude acts on AWS directly
-  via tool calls (`mcp__aws-mcp__aws___run_script`, using `call_boto3`) instead of narrating
-  console steps. Two real setup bugs: (1) its MCP server launches via `uvx`, needing the
-  separate `uv` package manager - missing on this machine, caused silent `CONNECTION_CLOSED`
-  until installed; (2) the generated MCP config was missing `AWS_MCP_PROXY_PROFILES`, so it
-  silently defaulted to this machine's pre-existing, unrelated `default` AWS profile (a
-  different real account, likely an office one) - caught only by checking
-  `sts:GetCallerIdentity` before acting, not by assuming the profile was right. Fixed by pinning
-  `AWS_MCP_PROXY_PROFILES=echoledger` in `.claude.json`'s `aws-mcp` entry.
-- **Standing rule (saved to memory)**: always verify the exact AWS account number
-  (`529470780389`) before any AWS action in this project, every session - this machine holds
-  other real AWS credentials that must never be touched by accident.
-- Created IAM user `echoledger-deploy` with `PowerUserAccess` (broad access, user's explicit
-  call, to narrow later once exact Phase 6 permission needs are known). No access key yet -
-  deferred until Session C actually needs one for GitHub Actions, at which point it goes
-  straight into GitHub's secrets store, never displayed in chat - same rule as every other
-  secret in this project.
+- Full local toolchain (ruff/mypy/pytest) still clean after all of this phase's changes.
+- Checked every piece together in one pass rather than trusting each session's individual
+  verification to still hold: budget `HEALTHY`, 6 images in ECR, ECS service `1/1 running`,
+  EFS `available`, secret present - then hit the live API one more time for real (`/scorecard`
+  → `200 OK`) before touching anything.
+- **Scaled the service to 0** (`desiredCount: 0`, confirmed `runningCount` actually reached 0,
+  not just that the API call succeeded) - stops Fargate compute billing between sessions. EFS
+  storage, the ECR images, secrets, IAM roles, and the task definition all persist untouched, so
+  resuming later is just `ecs:UpdateService(desiredCount=1)` away, not a rebuild.
+
+### Session A - account safety net
+
+This account (`529470780389`, "Hello World") is an AWS Organization member account managed
+through **IAM Identity Center** - the login identity ("Shaik") federates into a role per
+account, rather than a classic root email/password. Root genuinely has no password and no MFA
+(`AccountPasswordPresent: 0`, `AccountMFAEnabled: 0` via `iam:GetAccountSummary`) - not a gap to
+fix, just how this account type works; nothing can log in as root here, so it isn't a real
+attack surface. Deliberately did NOT chase Identity-Center-level MFA either - that instance
+lives in a separate organization-management account outside this project's scope.
+
+The account-creation flow's "$20/month spend limit" does NOT show up in AWS's standard Budgets
+API (confirmed via `budgets:DescribeBudgets` returning empty) - created a real, standard AWS
+Budget instead (`EchoLedger-Monthly`, $20 USD/month, email alerts at 80%/100% actual +
+forecasted-over-100%), confirmed `HealthStatus: HEALTHY`. This is what actually satisfies the
+non-negotiable budget-alarm-before-deployment rule.
+
+Installed the **Agent Toolkit for AWS** (official AWS MCP server) so Claude acts on AWS directly
+via tool calls (`mcp__aws-mcp__aws___run_script`, using `call_boto3`) instead of narrating
+console steps. Two real setup bugs: (1) its MCP server launches via `uvx`, needing the separate
+`uv` package manager - missing on this machine, caused silent `CONNECTION_CLOSED` until
+installed; (2) the generated MCP config was missing `AWS_MCP_PROXY_PROFILES`, so it silently
+defaulted to this machine's pre-existing, unrelated `default` AWS profile (a different real
+account, likely an office one) - caught only by checking `sts:GetCallerIdentity` before acting,
+not by assuming the profile was right. Fixed by pinning `AWS_MCP_PROXY_PROFILES=echoledger` in
+`.claude.json`'s `aws-mcp` entry. **Standing rule (saved to memory)**: always verify the exact
+AWS account number before any AWS action in this project, every session.
+
+Created IAM user `echoledger-deploy` with `PowerUserAccess` (broad access, user's explicit call,
+to narrow later once exact permission needs are known).
+
+### Session B - secrets migration
+
+`ANTHROPIC_API_KEY`/`OPENAI_API_KEY` now also live in AWS Secrets Manager (`echoledger/api-keys`,
+one JSON secret for both). `config.py`'s `_load_secrets_from_aws()` only activates when
+`ECHOLEDGER_SECRETS_ARN` is set (never true locally) - populates `os.environ` via `setdefault`
+before the Anthropic/OpenAI SDKs read their keys, same DI pattern as every external API call in
+this project. Verified for real against the actual secret (not just a mocked client). Real
+local-only snag: the `echoledger` CLI profile's `aws login` credential type needs
+`botocore[crt]`, which plain `boto3` doesn't pull in - doesn't affect the deployed container,
+which uses an IAM role instead.
+
+### Session C - build + push to ECR in CI
+
+Finally verifies the Dockerfile for real (open exception since Phase 1 - local `docker build`
+hangs on this machine's VPN setup; building in GitHub's clean network sidesteps it).
+`.github/workflows/deploy.yml` builds and pushes to a new ECR repo (`echoledger`) on every push
+to `master`, authenticating via **OIDC** (no stored AWS secret in GitHub - a role trusted only
+for this repo's `master` branch). Real bug: GitHub's OIDC `sub` claim now appends immutable
+numeric IDs after the owner/repo names (`repo:OWNER@id/REPO@id:ref:...`, not the plain format
+most docs show) - a newer anti-rename-hijack protection, diagnosed via CloudTrail (shows AWS's
+actual-received claim) rather than the uninformative generic `AccessDenied` in the Actions log.
+
+### Session D - persistent storage
+
+Real, verified finding that changed the Session E plan - App Runner (originally assumed compute
+target) is explicitly stateless per AWS's own docs, no EFS support. Moved to **ECS Fargate**
+instead, which supports EFS volumes natively. Created the EFS file system + an access point
+scoped to `/echoledger-data` (POSIX uid/gid `0:0`, matching the Dockerfile's root user) + mount
+targets in the default VPC's 3 subnets, all confirmed `available`. No app code changes needed -
+`ECHOLEDGER_DATA_DIR` already drove `DATA_DIR`/`DB_PATH`/Chroma's path since Phase 1.
+
+### Session E - compute + go live
+
+EchoLedger is genuinely running in AWS. Dockerfile now defaults to serving the FastAPI API
+(`uvicorn`), CLI still reachable via command override for a future scheduled ingest task (not
+built - deliberately out of scope). ECS Fargate cluster/service (`echoledger`), two IAM roles
+(execution role for the ECS agent; narrowly-scoped task role for the running container's Secrets
+Manager + EFS access), EFS mounted at `/data`. No ALB/NAT gateway - the task gets a public IP
+directly, good enough for a solo project at this stage. **Verified for real**: hit the live
+public endpoint, got genuine `200 OK` responses, confirmed in CloudWatch logs.
+
+Afterward, populated the live environment with real data: bridged the local, already
+human-approved database (344MB) onto the live EFS volume via a temporary S3 bootstrap step and a
+non-interactive one-off ECS task, rather than faking the human-approval step for a fresh live
+fetch (the A2A Verification agent isn't deployed, and true interactive approval isn't achievable
+through current tooling - flagged both rather than working around them). Verified byte-for-byte;
+confirmed real, previously-approved content now serves correctly, with `diary_pending` still
+correctly gating unapproved dates.
+
+### Session F - final verification + scale down
+
+Checked every piece together in one pass: budget `HEALTHY`, ECR images present, ECS service
+`1/1 running`, EFS `available`, secret present, full local toolchain (ruff/mypy/pytest) still
+clean - then hit the live API one more time for real before touching anything. **Scaled the
+service to 0** (confirmed `runningCount` actually reached 0, not just that the API call
+succeeded) to stop Fargate compute billing between sessions - EFS storage, ECR images, secrets,
+IAM roles, and the task definition all persist untouched, so resuming is one
+`ecs:UpdateService(desiredCount=1)` call away, not a rebuild.
 
 ### Key decision: 1926 data source
 
