@@ -1,5 +1,41 @@
 # Progress Log
 
+## Session 8, continued — Secrets migration to AWS Secrets Manager (Phase 6, Session B of F)
+
+**Finishes the secrets piece of Phase 6.** Moved `ANTHROPIC_API_KEY`/`OPENAI_API_KEY` out of
+`.env`-only into AWS Secrets Manager, without disturbing local dev at all.
+
+- Created `echoledger/api-keys` in Secrets Manager - one JSON secret holding both keys (fewer
+  secrets to manage than one-per-key). Created via the AWS CLI referencing a local temp file
+  (`--secret-string file://...`), not inlined in any command or tool call - a real key value
+  appearing as a literal in a `run_script` call got auto-blocked by the harness's own safety
+  classifier (credential-leakage check) on the first attempt, which is exactly the kind of
+  defense-in-depth this project's own "never paste secrets" rule is about. Temp file deleted
+  immediately after.
+- `config.py` gained `_load_secrets_from_aws()`: only activates when `ECHOLEDGER_SECRETS_ARN`
+  is set (never true locally), fetches the JSON secret, and populates `os.environ` via
+  `setdefault` (so an already-set env var always wins) before `anthropic.Anthropic()`/`OpenAI()`
+  read their keys - both SDKs already read straight from the environment, so no other code
+  needed to change. Same dependency-injection pattern as every external API call in this
+  project (`client` param, defaults to the real `boto3.client`, tests inject a fake).
+- Added `boto3` as a real dependency (needed by the app itself now, not just tooling).
+- **Verified for real against the actual secret**, not just the fake-client unit tests: set
+  `ECHOLEDGER_SECRETS_ARN` to the real ARN, cleared the env vars, imported `config`, confirmed
+  both keys genuinely got fetched and populated (checked only that they're present and have the
+  right prefix - `sk-ant`/`sk-proj` - never printed the actual values).
+- **Real, local-only finding**: that real-secret test initially failed with
+  `MissingDependencyException` - the newer `aws login` credential flow (used by the `echoledger`
+  CLI profile from Session A) needs `botocore[crt]` installed, which plain `boto3` doesn't pull
+  in by default. Installed it to unblock local verification. Not a deployment concern - the
+  actual deployed container will authenticate via an IAM role, not this CLI login flow, so it
+  won't hit this.
+- 95 tests total (added 3 for the new loader), all green. Ruff and mypy clean.
+
+**Session B "done" checklist:**
+- [x] Both API keys stored in AWS Secrets Manager
+- [x] App code reads from Secrets Manager when deployed, `.env` unchanged for local dev
+- [x] Verified for real against the actual AWS secret, not just mocked
+
 ## Session 8 — AWS account setup (Phase 6, Session A of F)
 
 **Not Phase 6 complete - just the account safety net.** First real session on Phase 6

@@ -172,9 +172,18 @@ LangGraph + A2A + a new data-model change all at once would be too much new surf
 Target deliverable: EchoLedger containerized and running in AWS, with a persistent data store,
 secrets out of `.env`, a budget alarm, and an automated (GitHub Actions) deploy pipeline.
 
-**Status: Session A of F done (2026-11-06).** Broken into small sessions (A: account safety net,
-B: secrets migration, C: build image in CI, D: persistent storage, E: compute + go live,
+**Status: Sessions A-B of F done (2026-11-06).** Broken into small sessions (A: account safety
+net, B: secrets migration, C: build image in CI, D: persistent storage, E: compute + go live,
 F: verify + wrap up).
+
+- **Session B - secrets migration:** `ANTHROPIC_API_KEY`/`OPENAI_API_KEY` now also live in AWS
+  Secrets Manager (`echoledger/api-keys`, one JSON secret for both). `config.py`'s
+  `_load_secrets_from_aws()` only activates when `ECHOLEDGER_SECRETS_ARN` is set (never true
+  locally) - populates `os.environ` via `setdefault` before the Anthropic/OpenAI SDKs read their
+  keys, same DI pattern as every external API call in this project. Verified for real against
+  the actual secret (not just a mocked client). Real local-only snag: the `echoledger` CLI
+  profile's `aws login` credential type needs `botocore[crt]`, which plain `boto3` doesn't pull
+  in - won't affect the deployed container, which uses an IAM role instead.
 
 - **AWS account structure, verified for real**: this account (`529470780389`, "Hello World") is
   an AWS Organization member account managed through **IAM Identity Center** - the login
@@ -250,7 +259,7 @@ API, and NOT an India-based source. Reasoning, for future reference:
 
 Python 3.11+ (3.13.1 installed), venv named `EchoLedger/` (gitignored). Dependencies: pydantic,
 httpx, python-dotenv, tzdata (Windows only), anthropic, fastapi, uvicorn, openai, chromadb,
-langgraph, a2a-sdk, sse-starlette. Dev tools: pytest, ruff, mypy. Ask before adding any
+langgraph, a2a-sdk, sse-starlette, boto3. Dev tools: pytest, ruff, mypy. Ask before adding any
 dependency not listed here or in `pyproject.toml`.
 
 ## Repo structure (current)
