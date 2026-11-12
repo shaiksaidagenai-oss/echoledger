@@ -31,6 +31,14 @@ out into services/verification_agent as its own independent service,
 reached via A2A, per the roadmap. That server process persists its own
 LeakageJudgment row; this module no longer needs a DB connection or an
 Anthropic client for the judge step at all.
+
+write_and_send_for_email_approval() is a deliberately separate, simpler
+path for remote (email) approval - it does NOT use run_diary_workflow's
+interrupt()/resume(), since that mechanism assumes a human answers
+synchronously in the same process call. Email approval is inherently
+asynchronous (the reply might come hours or days later), which would
+need a persistent checkpointer across process boundaries - exactly what
+run_diary_workflow was built to avoid needing in the first place.
 """
 
 from __future__ import annotations
@@ -46,6 +54,7 @@ from langgraph.graph import START, StateGraph
 from langgraph.types import Command, interrupt
 
 from echoledger.agents.verification_client import judge_via_a2a
+from echoledger.approval_email import send_approval_email
 from echoledger.llm.arthur import write_diary_entry
 from echoledger.models import ArthurDiaryEntry, HistoricalArticle
 from echoledger.storage.db import set_diary_approved
@@ -165,3 +174,23 @@ def run_diary_workflow(
         model=model,
         approved=result["approved"],
     )
+
+
+def write_and_send_for_email_approval(
+    conn: sqlite3.Connection,
+    historical_date: date,
+    articles: list[HistoricalArticle],
+    model: str,
+    client: anthropic.Anthropic | None = None,
+    judge_fn: Callable[[str, date], tuple[str, list[str]]] = judge_via_a2a,
+    send_email_fn: Callable[[date, str, str | None, list[str]], None] = send_approval_email,
+) -> ArthurDiaryEntry:
+    """Write -> judge -> email for remote approval. See this module's
+    docstring for why this deliberately doesn't use run_diary_workflow's
+    interrupt()/resume(). Returns the entry already saved as pending
+    (approved=False) - the approval handler flips that flag later, when
+    the human clicks a link in the email."""
+    entry = write_diary_entry(conn, historical_date, articles, model, client=client)
+    verdict, violations = judge_fn(entry.entry_text, historical_date)
+    send_email_fn(historical_date, entry.entry_text, verdict, violations)
+    return entry

@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from echoledger.agents.diary_workflow import run_diary_workflow
+from echoledger.agents.diary_workflow import run_diary_workflow, write_and_send_for_email_approval
 from echoledger.models import HistoricalArticle
 from echoledger.storage.db import connect, get_diary_entry
 
@@ -147,3 +147,36 @@ def test_run_diary_workflow_stops_regenerating_at_max_attempts(conn: sqlite3.Con
 
     assert calls == [1, 2]  # stopped asking once max_attempts was reached
     assert entry.approved is False  # "regenerate" past the limit finalizes as rejected
+
+
+def test_email_approval_path_writes_judges_and_emails_without_blocking(
+    conn: sqlite3.Connection,
+) -> None:
+    fake_client = _FakeClient(["A clean entry."])
+    emails_sent: list[tuple[date, str, str | None, list[str]]] = []
+
+    def _fake_send_email(
+        historical_date: date, entry_text: str, verdict: str | None, violations: list[str]
+    ) -> None:
+        emails_sent.append((historical_date, entry_text, verdict, violations))
+
+    entry = write_and_send_for_email_approval(
+        conn,
+        date(1926, 10, 29),
+        [_article()],
+        model="claude-haiku-4-5",
+        client=fake_client,  # type: ignore[arg-type]
+        judge_fn=_fake_judge,
+        send_email_fn=_fake_send_email,
+    )
+
+    # Returns immediately with the entry still pending - no interrupt, no wait.
+    assert entry.approved is False
+    assert entry.entry_text == "A clean entry."
+
+    # Exactly one email, with the real draft text and judge verdict.
+    assert emails_sent == [(date(1926, 10, 29), "A clean entry.", "pass", [])]
+
+    # The entry is genuinely saved, same as the terminal path - just unapproved.
+    saved = get_diary_entry(conn, date(1926, 10, 29))
+    assert saved is not None and saved.approved is False

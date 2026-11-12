@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 from datetime import date
 
-from echoledger.agents.diary_workflow import run_diary_workflow
+from echoledger.agents.diary_workflow import run_diary_workflow, write_and_send_for_email_approval
 from echoledger.api.views import build_daily_view
 from echoledger.config import DB_PATH, LLM_MODEL, NEWSPAPER_KEY, RAW_DIR
 from echoledger.evals.brier import brier_score
@@ -110,15 +110,21 @@ def cmd_fetch(args: argparse.Namespace) -> None:
     # `fetch` for a date you've already processed never spends money twice.
     if get_diary_entry(conn, historical_date) is None:
         print(f"  Arthur is writing his diary entry for {historical_date} ({LLM_MODEL})...")
-        entry = run_diary_workflow(
-            conn,
-            historical_date,
-            historical_articles,
-            model=LLM_MODEL,
-            get_approval=_ask_for_diary_approval,
-        )
-        status = "approved" if entry.approved else "rejected"
-        print(f"  Arthur's diary entry for {historical_date}: {status}.")
+        if args.approval == "email":
+            write_and_send_for_email_approval(
+                conn, historical_date, historical_articles, model=LLM_MODEL
+            )
+            print(f"  Arthur's diary entry for {historical_date}: emailed for approval.")
+        else:
+            entry = run_diary_workflow(
+                conn,
+                historical_date,
+                historical_articles,
+                model=LLM_MODEL,
+                get_approval=_ask_for_diary_approval,
+            )
+            status = "approved" if entry.approved else "rejected"
+            print(f"  Arthur's diary entry for {historical_date}: {status}.")
     else:
         print(f"  Arthur's diary entry for {historical_date} already exists - skipping.")
 
@@ -241,6 +247,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     fetch_parser = subparsers.add_parser("fetch", help="Fetch and cache data for a date")
     fetch_parser.add_argument("--date", type=_parse_date, default=None)
+    fetch_parser.add_argument(
+        "--approval",
+        choices=["terminal", "email"],
+        default="terminal",
+        help="How Arthur's diary entry gets approved: interactively at this "
+        "terminal (default), or by emailing the draft with signed "
+        "Approve/Reject links and returning immediately without waiting.",
+    )
     fetch_parser.set_defaults(func=cmd_fetch)
 
     show_parser = subparsers.add_parser("show", help="Show cached data for a date")
