@@ -200,8 +200,12 @@ Account `529470780389`, region `ap-southeast-2`. Local AWS CLI profile: `echoled
   by all three services that need it)
 - IAM roles: `echoledger-deploy` (broad, human/CLI use), `echoledger-github-actions` (OIDC,
   CI only), `echoledger-ecs-execution` (ECS agent, all services), `echoledger-ecs-task` (main
-  app + verification agent - EFS + Secrets Manager), `echoledger-approval-handler-ecs`
-  (approval handler - same scope, its own role)
+  app + verification agent - EFS + Secrets Manager + `ses:SendEmail` scoped to the one verified
+  From address), `echoledger-approval-handler-ecs` (approval handler - EFS + Secrets Manager
+  only, its own role)
+- Main app task def env also has `ECHOLEDGER_APPROVAL_BASE_URL` (the approval-handler's current
+  IP - goes stale on its next restart, re-set it when wiring a fresh `fetch --approval email`
+  run) and `ECHOLEDGER_NOTIFY_EMAIL` (the verified SES address).
 - Security groups: `echoledger-service` (main app, inbound 8000 from internet),
   `echoledger-verification-agent` (inbound 9998 from the main app's SG only),
   `echoledger-approval-handler` (inbound 8080 from the internet - named
@@ -340,20 +344,31 @@ service, Cloud Map namespace, security group). Full details and the real deploye
 task called the deployed judge over Cloud Map DNS and got a genuine Claude-backed verdict back,
 and the judge's own task independently persisted its own database row.
 
-### Step 2 - Email-based approval: IN PROGRESS (Session B of D done)
+### Step 2 - Email-based approval: DONE (2026-11-12)
 
-Switched from WhatsApp to email (see the scope note above). Broken into sessions: A (SES setup,
-done), B (the approval endpoint, done), C (wire it into the actual draft-ready flow - send the
-real email with signed links), D (real end-to-end test).
+Switched from WhatsApp to email (see the scope note above). All four sessions done: A (SES
+setup), B (the approval endpoint on ECS), C (wired into the real draft-ready flow), D (real
+end-to-end test).
 
-**Session B done**: the Approve/Reject endpoint is live on ECS Fargate (not Lambda - see the
-Phase 6 resource reference above for why). Signed HMAC tokens (`approval_tokens.py`,
+**Session B**: the Approve/Reject endpoint is live on ECS Fargate (not Lambda - see the Phase 6
+resource reference above for why). Signed HMAC tokens (`approval_tokens.py`,
 `services/approval_handler/`) verified correctly against real deployed infrastructure. Full
 story of the Lambda->ECS pivot and the two PowerShell 5.1 bugs hit along the way is in
 PROGRESS.md Session 10.
 
-**Not done yet:** wiring the email-send into the actual draft-ready flow (Session C), the real
-end-to-end test (Session D), Regenerate (deferred - needs the full LLM/judge pipeline, not
+**Sessions C+D**: `approval_email.py` sends the full diary text + signed links via SES;
+`write_and_send_for_email_approval()` writes/judges/saves-as-pending/emails and returns
+immediately - deliberately not using `run_diary_workflow`'s `interrupt()`/`resume()`, which
+assumes synchronous same-process approval. `fetch --approval email` opts in; `terminal` stays
+default. **Real gap caught mid-test**: first attempt ran `fetch` locally while the approval
+click hit the deployed EFS database - two different databases sharing no rows, so the click
+"succeeded" against zero matching rows. Fixed by re-running the write step the way Step 3 will
+actually run it - as an ECS one-off task sharing the same EFS database. **Verified completely
+for real**: a real ECS-generated diary entry, emailed, user-clicked Approve, confirmed
+`approved=1` in the same shared database via an independent ECS task - not just a success
+message taken at face value.
+
+**Not done yet:** Regenerate via email (deferred - needs the full LLM/judge pipeline, not
 something for this small endpoint), automating the daily ingest (Step 3).
 
 ### Key decision: 1926 data source

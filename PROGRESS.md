@@ -1,5 +1,44 @@
 # Progress Log
 
+## Session 11 — Email approval, Sessions C+D: wired in and verified for real (Step 2 DONE)
+
+**Finishes Step 2.** Session started with the AWS CLI login expired after a 6-day gap (exactly
+as anticipated in CLAUDE.md) - `aws login --profile echoledger` plus a VSCode "Reload Window"
+fixed both the CLI session and the MCP server's connection to it.
+
+- New `approval_email.py`: builds the two signed Approve/Reject links and sends the full diary
+  text via SES. New `write_and_send_for_email_approval()` in `diary_workflow.py` - write, judge,
+  save as pending, email, return immediately. Deliberately does NOT use `run_diary_workflow`'s
+  `interrupt()`/`resume()` - that mechanism assumes a human answers synchronously in the same
+  process call, which doesn't fit email's inherently asynchronous reply. New
+  `fetch --approval email` CLI option; `terminal` stays the default.
+- **Real gap caught mid-test, not a code bug**: first real test ran `fetch` locally (writing to
+  the local SQLite file) while the approval click hit the deployed approval-handler (writing to
+  the separate EFS-mounted database) - two different databases that happened to share no rows.
+  The click genuinely "succeeded" (a real, correctly-executed `UPDATE ... WHERE date = ?`), it
+  just had zero matching rows to act on. Confirmed via a one-off ECS task reading the EFS
+  database directly: empty, as expected once the mismatch was understood.
+- **Redid the test the way Step 3 will actually run it**: `fetch --approval email` as a one-off
+  ECS task (not local), using the same EFS database, Cloud Map DNS for the Verification agent,
+  and the deployed approval-handler's current IP for the email links. Added the missing
+  `ECHOLEDGER_APPROVAL_BASE_URL`/`ECHOLEDGER_NOTIFY_EMAIL` env vars and an `ses:SendEmail`
+  permission (scoped to the one verified From address) to the main task's role and definition.
+- **Verified for real, completely**: the ECS task ran, Arthur wrote a real, well-grounded entry
+  about real 1926 news (correctly cited the Italo-Yugoslav tension, Illinois gang violence, a
+  naval air race mishap, Machado in Cuba), judged `pass`, emailed it. User received the real
+  email, clicked **Approve**, and a separate ECS task reading the same EFS database confirmed
+  `('1926-11-13', 1)` - genuinely approved, independently verified, not just a success message
+  trusted at face value.
+- Scaled all three services back to 0 afterward, confirmed `runningCount` reached 0 for all.
+- 110 tests total, all green. Ruff and mypy clean.
+
+**Step 2 "done" checklist - all four sessions:**
+- [x] A: SES identity verified, real test email confirmed delivered
+- [x] B: Approve/Reject endpoint live on ECS, signed tokens verified
+- [x] C: wired into the real draft-ready flow (`fetch --approval email`)
+- [x] D: real end-to-end test - genuine email, genuine click, genuine database update, all
+  independently verified
+
 ## Session 10, continued — Email approval, Session B: the approval endpoint
 
 **Real pivot mid-session: Lambda's public invocation turned out to be organizationally
