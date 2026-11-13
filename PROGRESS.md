@@ -1,5 +1,62 @@
 # Progress Log
 
+## Session 12 — Automate the daily ingest (Step 3 DONE) - the roadmap's last piece
+
+**Finishes Step 3 and the whole post-roadmap plan.** Also spent real time on two AWS CLI
+session expirations mid-session (6+ days passed since the last real session) - each needed a
+fresh `aws login` plus a VSCode Reload Window to reconnect the MCP server, now a familiar,
+expected part of resuming work after a gap.
+
+- Built a small AWS Step Functions state machine (`echoledger-daily-pipeline`, Standard
+  workflow, JSONata): scale the Verification agent up -> wait 60s -> run `fetch --approval
+  email` as an ECS task via `ecs:runTask.sync` (Step Functions' built-in wait-for-completion,
+  no polling code of our own needed) -> scale the Verification agent back down, with a `Catch`
+  branch so a failed fetch still triggers cleanup instead of leaving the agent running.
+- **Real gotcha confirmed via AWS's own docs before building, not discovered by trial and
+  error for once**: `ecs:runTask.sync` secretly needs more than `ecs:RunTask` - also
+  `ecs:DescribeTasks`/`ecs:StopTask` (Resource `*`) and `events:PutTargets`/`PutRule`/
+  `DescribeRule` on an AWS-managed rule name, because Step Functions uses an EventBridge rule
+  internally to learn when the ECS task finishes. Missing this is a well-known silent-failure
+  trap - got it right on the first attempt by checking AWS's own IAM policy templates first.
+- **EventBridge Scheduler** triggers the state machine daily at **11:00 AM Asia/Kolkata**
+  (`ScheduleExpressionTimezone`, not a manually-converted UTC cron - AWS handles the timezone
+  conversion natively). Hit the same IAM eventual-consistency propagation delay as the Phase 6
+  OIDC trust policy (the scheduler's role had just been created) - same fix, just wait a few
+  seconds and retry.
+- **Verified for real by triggering a manual execution** rather than waiting for 11 AM: the
+  full sequence ran in ~3 minutes, genuinely wrote and judged a brand-new diary entry for
+  1926-11-12 (the EFS database had no row for it yet), emailed it, and the Verification agent
+  confirmed back to `desiredCount: 0, runningCount: 0` afterward - not just a "SUCCEEDED" label
+  taken at face value, independently confirmed via `ecs:DescribeServices`.
+- **A real incident this verification surfaced, exactly the risk flagged weeks ago during
+  planning**: the email arrived late (Gmail delayed it ~an hour), and by the time the user
+  clicked Approve, the approval-handler - which we'd been scaling to 0 between sessions for
+  cost control - had been restarted, so its IP had changed and the link pointed nowhere
+  ("took too long to respond"). Diagnosed for real (not guessed): confirmed the SES send itself
+  had genuinely succeeded (the task would have crashed immediately after that line if it
+  hadn't, and every later pipeline step completed normally), confirmed `ECHOLEDGER_NOTIFY_EMAIL`
+  matched exactly, and only then concluded it was a dead IP, not a code or delivery bug.
+  Fixed the one pending approval directly - the signed token only depends on
+  date+action+signing-key, not the IP, so a fresh correctly-pointed link could be built by hand
+  without needing to resend the email.
+- **Resulting operational decision, now in effect**: `approval-handler` stays at
+  `desiredCount: 1` permanently from here on - no safe way to predict when a human will click,
+  so it can't be cycled like the Verification agent can. `echoledger` (the main app) and
+  `verification-agent` both stay at 0 by default; the daily Step Functions run brings the
+  Verification agent up only for the few minutes it's actually needed.
+- Confirmed the fix for real: generated a fresh link pointing at the approval-handler's current
+  IP, user clicked it, and a separate ECS task reading the shared database confirmed
+  `[('1926-11-12', 1), ('1926-11-13', 1)]` - both genuinely approved.
+
+**Step 3 "done" checklist:**
+- [x] Daily schedule created (11:00 AM Asia/Kolkata, EventBridge Scheduler)
+- [x] Orchestration (scale up -> run -> scale down) verified for real via a manual trigger
+- [x] Cleanup confirmed even on the success path (verification-agent back to 0, independently
+  checked)
+- [x] The approval-handler's IP-staleness risk, flagged during planning, actually occurred and
+  got diagnosed and fixed for real - and the operational fix (always-on approval-handler) is
+  now in place so it won't recur
+
 ## Session 11 — Email approval, Sessions C+D: wired in and verified for real (Step 2 DONE)
 
 **Finishes Step 2.** Session started with the AWS CLI login expired after a 6-day gap (exactly

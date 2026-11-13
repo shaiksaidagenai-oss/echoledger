@@ -188,12 +188,16 @@ Account `529470780389`, region `ap-southeast-2`. Local AWS CLI profile: `echoled
   `approval-handler` (task def family: `echoledger-approval-handler`, port 8080, plain HTTP -
   no HTTPS needed since email replaced WhatsApp and the signed token secures the action, not
   the transport)
-- **All three services are currently scaled to 0** (`desiredCount: 0`) to stop compute billing
-  between sessions - scale back up with `ecs:UpdateService(desiredCount=1)` before trying to
-  reach any of them; each one's public IP changes on every new task, re-fetch it via the task's
-  ENI. The verification agent is reachable internally at
-  `verification-agent.echoledger.local:9998` (Cloud Map private DNS, namespace
-  `ns-ym3atae4sjdpyus4`) - only from the main app's security group, not the internet.
+- **Operational steady state (as of Step 3): `approval-handler` stays at `desiredCount: 1`
+  permanently** - there's no way to predict when a human will click an email link, so unlike
+  the other two it can't be safely cycled (this was learned the hard way - see PROGRESS.md
+  Session 12 for the real incident). `echoledger` (main app) and `verification-agent` both stay
+  at `desiredCount: 0` by default; the daily Step Functions pipeline brings `verification-agent`
+  up only for the few minutes it's actually needed, then back down automatically. Each
+  service's public IP changes on every new task - re-fetch it via the task's ENI before
+  building a fresh approval link or hitting the main app manually. The verification agent is
+  reachable internally at `verification-agent.echoledger.local:9998` (Cloud Map private DNS,
+  namespace `ns-ym3atae4sjdpyus4`) - only from the main app's security group, not the internet.
 - EFS file system: `fs-0bdb392946541090a`; access point: `fsap-0b16f15a72cbb283e`
   (`/echoledger-data`, mounted at `/data` in all three services' containers)
 - Secret: `echoledger/api-keys` (both API keys + `APPROVAL_SIGNING_KEY`, one JSON secret, read
@@ -202,7 +206,14 @@ Account `529470780389`, region `ap-southeast-2`. Local AWS CLI profile: `echoled
   CI only), `echoledger-ecs-execution` (ECS agent, all services), `echoledger-ecs-task` (main
   app + verification agent - EFS + Secrets Manager + `ses:SendEmail` scoped to the one verified
   From address), `echoledger-approval-handler-ecs` (approval handler - EFS + Secrets Manager
-  only, its own role)
+  only, its own role), `echoledger-pipeline-orchestrator` (the Step Functions state machine's
+  own execution role), `echoledger-scheduler` (EventBridge Scheduler's role, just
+  `states:StartExecution` on the one state machine)
+- **Daily automation**: Step Functions state machine `echoledger-daily-pipeline` (scale
+  Verification agent up -> wait 60s -> `fetch --approval email` via `ecs:runTask.sync` -> scale
+  back down, with cleanup on failure too), triggered daily at **11:00 AM Asia/Kolkata** by
+  EventBridge Scheduler `echoledger-daily-pipeline`. Check a run's outcome via
+  `stepfunctions:ListExecutions`/`DescribeExecution`.
 - Main app task def env also has `ECHOLEDGER_APPROVAL_BASE_URL` (the approval-handler's current
   IP - goes stale on its next restart, re-set it when wiring a fresh `fetch --approval email`
   run) and `ECHOLEDGER_NOTIFY_EMAIL` (the verified SES address).
@@ -319,13 +330,16 @@ succeeded) to stop Fargate compute billing between sessions - EFS storage, ECR i
 IAM roles, and the task definition all persist untouched, so resuming is one
 `ecs:UpdateService(desiredCount=1)` call away, not a rebuild.
 
-## Post-roadmap — remote approval + automated publishing: IN PROGRESS
+## Post-roadmap — remote approval + automated publishing: Steps 1-3 DONE, publishing not started
 
 The original 6-phase roadmap is complete. User's next direction, in this order: (1) deploy the
 Verification agent to AWS, (2) remote (email-based) human approval, (3) automate the daily
 ingest pipeline. These are deliberately sequenced, not independent - the daily pipeline can't
 run unattended until there's both a deployed judge *and* a way to approve remotely; email
-approval is what actually unblocks automation, not a separate nice-to-have.
+approval is what actually unblocks automation, not a separate nice-to-have. **All three are now
+done (2026-11-13)** - EchoLedger genuinely runs itself daily, pausing only for a human click.
+**Not started yet**: actually publishing approved content anywhere (LinkedIn first, Blogger/
+Medium as alternatives - see the scope note below and `project_future_feature_ideas` in memory).
 
 **Approval channel decided 2026-11-06: email, not WhatsApp** (the original ask - see
 `project_whatsapp_approval_idea` in memory). WhatsApp needs a Meta-reviewed message template
@@ -369,7 +383,28 @@ for real**: a real ECS-generated diary entry, emailed, user-clicked Approve, con
 message taken at face value.
 
 **Not done yet:** Regenerate via email (deferred - needs the full LLM/judge pipeline, not
-something for this small endpoint), automating the daily ingest (Step 3).
+something for this small endpoint).
+
+### Step 3 - Automate the daily ingest: DONE (2026-11-13)
+
+**This was the last piece of the post-roadmap plan.** AWS Step Functions state machine
+`echoledger-daily-pipeline` + EventBridge Scheduler, running daily at 11:00 AM Asia/Kolkata -
+see the Phase 6 "Daily automation" resource reference above for the actual resources, and
+PROGRESS.md Session 12 for the full build (including the `ecs:runTask.sync` EventBridge
+permission gotcha, caught from AWS's own docs before it could bite).
+
+**Verified for real via a manual trigger**: genuinely wrote and judged a brand-new diary entry,
+emailed it, and confirmed the Verification agent's cleanup actually happened afterward
+(`desiredCount: 0`, independently checked, not just a "SUCCEEDED" label trusted at face value).
+
+**A real incident surfaced exactly the risk flagged during planning**: the approval-handler had
+been scaled to 0 between sessions, so by the time the (delayed) email got clicked, its IP had
+changed and the link was dead. Diagnosed for real (confirmed the SES send had genuinely
+succeeded, confirmed the recipient address was correct, only then concluded it was a stale IP)
+and fixed by hand-building a fresh link with the same signature pointed at the current IP - no
+resend needed, since the token doesn't encode the IP. **Resulting standing decision**:
+`approval-handler` now stays at `desiredCount: 1` permanently - it cannot be safely cycled like
+`verification-agent` can, since approval timing is unpredictable by nature.
 
 ### Key decision: 1926 data source
 
