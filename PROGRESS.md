@@ -1,5 +1,61 @@
 # Progress Log
 
+## Session 13 — Approved-post notification email (LinkedIn, manual posting)
+
+Post-roadmap feature, not part of the original 6-phase plan: once a diary entry is approved
+via the existing email link, a **second** email now goes to a different address
+(`shaiksaida.genai@gmail.com`, via new `ECHOLEDGER_APPROVED_NOTIFY_EMAIL`) with a ready-to-copy
+LinkedIn post - Arthur's diary entry, that day's real news summaries, and a short
+Claude-generated title tying the two eras together. LinkedIn posting itself stays manual (the
+user copies/pastes) - the LinkedIn API's own Terms of Use explicitly prohibit "automat[ing]
+posting," and refresh tokens are only available to approved Marketing Developer Platform
+partners anyway, so building real API auto-posting was rejected as both a ToS risk and
+impractical for a solo project. Medium's API is archived/unsupported since March 2023 - ruled
+out entirely. Blogger's API looked genuinely viable for a *future* auto-publish target (no
+posting restriction found, real refresh tokens once the OAuth app leaves "Testing" status) but
+wasn't requested - LinkedIn (manual) is the chosen target for now. Headline-based image
+generation (via OpenAI, reusing the already-configured key) was confirmed feasible but
+deliberately deferred - text only for this session.
+
+- New `years_later()` in `utils/dates.py` (the exact inverse of `years_ago()`) to go from
+  Arthur's historical date back to the real calendar date its news summaries are filed under.
+- New `llm/post_title.py` (`generate_post_title()`) - a small, separate Claude call (same
+  DI/cost-logging pattern as every other LLM call here) that writes the catchy title from both
+  halves of the content.
+- New `send_approved_post_email()` in `approval_email.py`, and the orchestration lives in
+  `services/approval_handler/core.py`'s `process_approval()` - fires only on `action ==
+  "approve"`, wrapped in a broad try/except: a failure here (bad SES/Claude call) must not turn
+  an already-successful approve click into an error response for whoever just clicked it,
+  since the DB flag is already flipped by the time it runs. Logged to stdout, not raised.
+- Added `anthropic` to the approval-handler's minimal Dockerfile dependency list (previously
+  just fastapi/uvicorn/pydantic/python-dotenv/boto3) - needed for the title-generation call.
+  `ANTHROPIC_API_KEY`/`OPENAI_API_KEY` already reach this service via the existing
+  `ECHOLEDGER_SECRETS_ARN` mechanism, no new secret plumbing needed.
+- SES sandbox mode required verifying `shaiksaida.genai@gmail.com` as a new recipient identity
+  (same process as the original address) before it could receive anything.
+- Added an `echoledger-ses-send` inline policy to `echoledger-approval-handler-ecs` (previously
+  EFS + Secrets Manager only), scoped to `ses:FromAddress = automation.vali@gmail.com` - same
+  pattern as the main app's task role.
+- **Real bug caught only by checking CloudWatch logs after the first live test, not assumed
+  from a "200 OK" response**: the first real approve-click test returned 200 (the DB flag
+  flipped correctly) but the notification silently failed - `KeyError: 'ECHOLEDGER_NOTIFY_EMAIL'`
+  - because that env var had never been needed on the approval-handler's task definition before
+  (only the main app used it, for the first email's Source address). Fixed by adding it to a
+  new task definition revision; this is exactly why the notification is wrapped in try/except
+  rather than left to raise - a config gap like this must not ever turn a real approval into an
+  error page.
+- Also re-registered the main app's task definition (`echoledger` family) with a fresh
+  `ECHOLEDGER_APPROVAL_BASE_URL` - the approval-handler's public IP had changed across this
+  session's two redeploys, and that env var only gets used the next time the daily pipeline
+  runs `fetch --approval email`, so it would otherwise have gone stale silently until the next
+  11 AM run.
+- **Verified completely for real**: re-triggered the real approve link for the already-approved
+  1926-11-12 entry (idempotent - no new fetch/LLM cost for the diary itself) against the fixed
+  deployment, confirmed via CloudWatch logs that no error was logged this time, and confirmed
+  directly with the user that the second email arrived at `shaiksaida.genai@gmail.com` with
+  correct title/diary/news content.
+- 123 tests total (121 fast + 2 real-API), all green; ruff and mypy clean.
+
 ## Session 12 — Automate the daily ingest (Step 3 DONE) - the roadmap's last piece
 
 **Finishes Step 3 and the whole post-roadmap plan.** Also spent real time on two AWS CLI

@@ -205,8 +205,8 @@ Account `529470780389`, region `ap-southeast-2`. Local AWS CLI profile: `echoled
 - IAM roles: `echoledger-deploy` (broad, human/CLI use), `echoledger-github-actions` (OIDC,
   CI only), `echoledger-ecs-execution` (ECS agent, all services), `echoledger-ecs-task` (main
   app + verification agent - EFS + Secrets Manager + `ses:SendEmail` scoped to the one verified
-  From address), `echoledger-approval-handler-ecs` (approval handler - EFS + Secrets Manager
-  only, its own role), `echoledger-pipeline-orchestrator` (the Step Functions state machine's
+  From address), `echoledger-approval-handler-ecs` (approval handler - EFS + Secrets Manager +
+  `ses:SendEmail` scoped to the same verified From address, its own role), `echoledger-pipeline-orchestrator` (the Step Functions state machine's
   own execution role), `echoledger-scheduler` (EventBridge Scheduler's role, just
   `states:StartExecution` on the one state machine)
 - **Daily automation**: Step Functions state machine `echoledger-daily-pipeline` (scale
@@ -216,7 +216,10 @@ Account `529470780389`, region `ap-southeast-2`. Local AWS CLI profile: `echoled
   `stepfunctions:ListExecutions`/`DescribeExecution`.
 - Main app task def env also has `ECHOLEDGER_APPROVAL_BASE_URL` (the approval-handler's current
   IP - goes stale on its next restart, re-set it when wiring a fresh `fetch --approval email`
-  run) and `ECHOLEDGER_NOTIFY_EMAIL` (the verified SES address).
+  run) and `ECHOLEDGER_NOTIFY_EMAIL` (the verified SES address). The approval-handler's own task
+  def (separate from the main app's) now also carries `ECHOLEDGER_NOTIFY_EMAIL` (used as the
+  Sender for the approved-post notification - see "Approved-post notification email" below) and
+  `ECHOLEDGER_APPROVED_NOTIFY_EMAIL` (that notification's recipient).
 - Security groups: `echoledger-service` (main app, inbound 8000 from internet),
   `echoledger-verification-agent` (inbound 9998 from the main app's SG only),
   `echoledger-approval-handler` (inbound 8080 from the internet - named
@@ -330,16 +333,49 @@ succeeded) to stop Fargate compute billing between sessions - EFS storage, ECR i
 IAM roles, and the task definition all persist untouched, so resuming is one
 `ecs:UpdateService(desiredCount=1)` call away, not a rebuild.
 
-## Post-roadmap — remote approval + automated publishing: Steps 1-3 DONE, publishing not started
+## Post-roadmap — remote approval + automated publishing: Steps 1-3 DONE, Step 4 in progress
 
 The original 6-phase roadmap is complete. User's next direction, in this order: (1) deploy the
 Verification agent to AWS, (2) remote (email-based) human approval, (3) automate the daily
-ingest pipeline. These are deliberately sequenced, not independent - the daily pipeline can't
-run unattended until there's both a deployed judge *and* a way to approve remotely; email
-approval is what actually unblocks automation, not a separate nice-to-have. **All three are now
-done (2026-11-13)** - EchoLedger genuinely runs itself daily, pausing only for a human click.
-**Not started yet**: actually publishing approved content anywhere (LinkedIn first, Blogger/
-Medium as alternatives - see the scope note below and `project_future_feature_ideas` in memory).
+ingest pipeline, (4) get approved content ready to publish. These are deliberately sequenced,
+not independent - the daily pipeline can't run unattended until there's both a deployed judge
+*and* a way to approve remotely; email approval is what actually unblocks automation, not a
+separate nice-to-have. **Steps 1-3 done (2026-11-13)** - EchoLedger genuinely runs itself daily,
+pausing only for a human click.
+
+**Step 4 (2026-11-13): LinkedIn posting stays manual, by deliberate decision** - not an open
+gap. Researched LinkedIn's own API Terms of Use: Section 3.1 item 26 explicitly prohibits
+"automat[ing] posting," and refresh tokens are only available to approved Marketing Developer
+Platform partners (a tier a solo project won't realistically reach) - both a real ToS risk and
+an impractical 60-day-reauth burden, so real API auto-posting was rejected. Medium's API has
+been archived/unsupported since March 2023 - ruled out entirely. Blogger's API looked genuinely
+viable for a *future* auto-publish target (no posting restriction found; real refresh tokens
+once the OAuth app leaves "Testing" status) but wasn't requested - manual LinkedIn posting is
+the chosen path for now. Built instead: on approval, a second email (see "Approved-post
+notification" below) with a ready-to-copy post, so the human just pastes it into LinkedIn
+themselves. Headline-based image generation (confirmed feasible via OpenAI, reusing the
+existing key) was deliberately deferred - text only so far.
+
+### Approved-post notification email (2026-11-13)
+
+On approval (not rejection), `services/approval_handler/core.py` sends a **second** email to a
+different address (`ECHOLEDGER_APPROVED_NOTIFY_EMAIL`, currently `shaiksaida.genai@gmail.com`)
+containing Arthur's diary entry + that day's real news summaries + a short Claude-generated
+title (`llm/post_title.py`) combining both. Wrapped in a broad try/except in
+`_notify_approved_post()` - the approve click's DB flag is already flipped by the time this
+runs, so a flaky SES/Claude call must not turn a genuinely successful approval into an error
+page; failures are logged, not raised. The approval-handler's Dockerfile gained the `anthropic`
+dependency for this; `ANTHROPIC_API_KEY`/`OPENAI_API_KEY` already reach it via the existing
+`ECHOLEDGER_SECRETS_ARN` mechanism. The `echoledger-approval-handler-ecs` role gained an
+`ses:SendEmail` policy (scoped to `ses:FromAddress = automation.vali@gmail.com`, same pattern as
+the main app's task role) since it previously only had EFS + Secrets Manager access. SES
+sandbox mode required verifying the new recipient address too (`shaiksaida.genai@gmail.com`),
+same process as the original address. **Real bug caught only via CloudWatch logs, not assumed
+from a 200 OK**: the first live test's approve click succeeded but the notification silently
+failed (`KeyError: 'ECHOLEDGER_NOTIFY_EMAIL'`) - that env var had never been needed on the
+approval-handler before (only the main app used it). Fixed via a new task definition revision;
+verified clean on a second real test, confirmed by the user that the email actually arrived
+with correct content.
 
 **Approval channel decided 2026-11-06: email, not WhatsApp** (the original ask - see
 `project_whatsapp_approval_idea` in memory). WhatsApp needs a Meta-reviewed message template
