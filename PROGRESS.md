@@ -1,5 +1,32 @@
 # Progress Log
 
+## Session 14 — Approved-post email gained Echo + Predictions
+
+Same-day follow-up to Session 13: the first version of the approved-post email only had the
+diary entry and a raw news-summary list, which didn't match the fuller "Then & Now" post format
+(Top headlines + Echo of the Day + Today's Prediction) the user actually wants to publish daily.
+
+- `services/approval_handler/core.py`'s `_notify_approved_post()` now also fetches
+  `get_echo_candidates()`/`get_today_headlines()`/`get_predictions_created_on()` for the modern
+  date, and picks the single best (lowest-distance) real echo match via a new `_pick_best_echo()`
+  helper - skipping candidates with a blank OCR'd historical headline, since those make a poor
+  thing to feature. Both the echo section and the predictions section are included only when
+  real data exists for that date - never fabricated, same discipline as every other section.
+- `approval_email.py`'s `send_approved_post_email()` now builds the full emoji-formatted
+  "Then & Now" layout (100 YEARS AGO TODAY / TODAY'S NEWS / ECHO OF THE DAY / TODAY'S
+  PREDICTION(S)), ready to paste into LinkedIn with no further editing.
+- Deliberately did NOT add a "Top 3" curation step - there's no real importance-ranking
+  mechanism in the data model, and fabricating one just to match a template would have been
+  the same kind of overclaiming this project has been careful to avoid elsewhere. All real news
+  summaries for the date are included instead, under "TODAY'S NEWS"; picking exactly 3 for the
+  final post stays a human editorial choice.
+- 126 tests total, all green; ruff and mypy clean.
+- **Verified for real**: rebuilt the approval-handler image via CI, forced a redeploy, then
+  re-triggered the real (idempotent) approve for the already-approved 1926-11-13 entry against
+  the new deployment. CloudWatch logs showed no error this time, and the user confirmed the
+  email arrived with both the real Echo of the Day match and the day's real predictions
+  included - not just title + diary + news like the Session 13 version.
+
 ## Session 13 — Approved-post notification email (LinkedIn, manual posting)
 
 Post-roadmap feature, not part of the original 6-phase plan: once a diary entry is approved

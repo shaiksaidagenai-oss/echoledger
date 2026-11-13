@@ -361,7 +361,12 @@ existing key) was deliberately deferred - text only so far.
 On approval (not rejection), `services/approval_handler/core.py` sends a **second** email to a
 different address (`ECHOLEDGER_APPROVED_NOTIFY_EMAIL`, currently `shaiksaida.genai@gmail.com`)
 containing Arthur's diary entry + that day's real news summaries + a short Claude-generated
-title (`llm/post_title.py`) combining both. Wrapped in a broad try/except in
+title (`llm/post_title.py`) combining both, plus (added 2026-11-13, same day) the single best
+real History Echo match for that date and any real predictions logged that day - the full
+emoji-formatted "Then & Now" layout, ready to paste into LinkedIn directly. Both the echo and
+predictions sections are included only when real data exists, never fabricated; no "Top 3"
+curation was added since there's no real importance-ranking signal to base one on - all news
+summaries are included and a human picks which to feature. Wrapped in a broad try/except in
 `_notify_approved_post()` - the approve click's DB flag is already flipped by the time this
 runs, so a flaky SES/Claude call must not turn a genuinely successful approval into an error
 page; failures are logged, not raised. The approval-handler's Dockerfile gained the `anthropic`
