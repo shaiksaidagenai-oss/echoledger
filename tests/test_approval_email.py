@@ -4,7 +4,7 @@ import pytest
 
 from echoledger.approval_email import send_approval_email, send_approved_post_email
 from echoledger.approval_tokens import verify_token
-from echoledger.models import NewsSummary
+from echoledger.models import NewsSummary, Prediction
 
 
 class _FakeSesClient:
@@ -86,6 +86,9 @@ def test_approved_post_email_goes_to_the_approved_notify_address() -> None:
         "A diary entry.",
         [_summary()],
         "A Catchy Title",
+        None,
+        None,
+        [],
         client=client,
     )
 
@@ -104,6 +107,9 @@ def test_approved_post_email_subject_includes_both_dates() -> None:
         "A diary entry.",
         [],
         "A Catchy Title",
+        None,
+        None,
+        [],
         client=client,
     )
 
@@ -123,6 +129,9 @@ def test_approved_post_email_body_has_title_diary_and_news() -> None:
         "Arthur writes about the weather.",
         summaries,
         "A Catchy Title",
+        None,
+        None,
+        [],
         client=client,
     )
 
@@ -130,3 +139,75 @@ def test_approved_post_email_body_has_title_diary_and_news() -> None:
     assert "Article Title: A Catchy Title" in body
     assert "Arthur writes about the weather." in body
     assert "Paraphrased news item." in body
+
+
+def test_approved_post_email_omits_echo_section_when_no_match() -> None:
+    client = _FakeSesClient()
+
+    send_approved_post_email(
+        date(1926, 11, 12), date(2026, 11, 12), "Entry.", [], "Title", None, None, [], client=client
+    )
+
+    body = client.sent[0]["Message"]["Body"]["Text"]["Data"]  # type: ignore[index]
+    assert "ECHO OF THE DAY" not in body
+
+
+def test_approved_post_email_includes_echo_section_when_match_given() -> None:
+    client = _FakeSesClient()
+
+    send_approved_post_email(
+        date(1926, 11, 12),
+        date(2026, 11, 12),
+        "Entry.",
+        [],
+        "Title",
+        "Foreign ministers confer on government relations.",
+        "US-mediated talks bring Russia and Ukraine to the table.",
+        [],
+        client=client,
+    )
+
+    body = client.sent[0]["Message"]["Body"]["Text"]["Data"]  # type: ignore[index]
+    assert "ECHO OF THE DAY" in body
+    assert "Foreign ministers confer on government relations." in body
+    assert "US-mediated talks bring Russia and Ukraine to the table." in body
+
+
+def test_approved_post_email_omits_predictions_section_when_none() -> None:
+    client = _FakeSesClient()
+
+    send_approved_post_email(
+        date(1926, 11, 12), date(2026, 11, 12), "Entry.", [], "Title", None, None, [], client=client
+    )
+
+    body = client.sent[0]["Message"]["Body"]["Text"]["Data"]  # type: ignore[index]
+    assert "PREDICTION" not in body
+
+
+def test_approved_post_email_includes_predictions_when_given() -> None:
+    client = _FakeSesClient()
+    prediction = Prediction(
+        id="pred-1",
+        created_date=date(2026, 11, 12),
+        resolution_date=date(2027, 3, 31),
+        statement="A ceasefire will be signed",
+        probability=0.25,
+        forecaster="claude-haiku-4-5",
+    )
+
+    send_approved_post_email(
+        date(1926, 11, 12),
+        date(2026, 11, 12),
+        "Entry.",
+        [],
+        "Title",
+        None,
+        None,
+        [prediction],
+        client=client,
+    )
+
+    body = client.sent[0]["Message"]["Body"]["Text"]["Data"]  # type: ignore[index]
+    assert "TODAY'S PREDICTION" in body
+    assert "A ceasefire will be signed by 2027-03-31" in body
+    assert "25%" in body

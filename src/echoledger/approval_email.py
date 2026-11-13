@@ -16,7 +16,7 @@ from typing import Any
 import boto3
 
 from echoledger.approval_tokens import make_token
-from echoledger.models import NewsSummary
+from echoledger.models import NewsSummary, Prediction
 
 
 def get_client() -> Any:
@@ -77,28 +77,56 @@ def send_approved_post_email(
     entry_text: str,
     summaries: list[NewsSummary],
     title: str,
+    echo_then: str | None,
+    echo_now: str | None,
+    predictions: list[Prediction],
     client: Any = None,
 ) -> None:
-    """Sent once an entry is approved - a ready-to-copy post combining both
-    halves of 'Then & Now' (Arthur's entry + today's real news) for manual
-    posting to LinkedIn. Goes to a different recipient than the approval
-    email itself (ECHOLEDGER_APPROVED_NOTIFY_EMAIL, not ECHOLEDGER_NOTIFY_EMAIL)."""
+    """Sent once an entry is approved - a ready-to-copy LinkedIn post
+    combining all of 'Then & Now' (Arthur's entry, today's real news, the
+    best History Echo match if one exists, and today's predictions) for
+    manual posting. Goes to a different recipient than the approval email
+    itself (ECHOLEDGER_APPROVED_NOTIFY_EMAIL, not ECHOLEDGER_NOTIFY_EMAIL).
+
+    Echo and predictions are each included only when real data exists for
+    that date - never invented, matching every other section here."""
     sender = os.environ["ECHOLEDGER_NOTIFY_EMAIL"]
     recipient = os.environ["ECHOLEDGER_APPROVED_NOTIFY_EMAIL"]
 
-    news_block = "\n\n".join(f"- {s.summary_text}" for s in summaries) or (
+    news_block = "\n".join(f"{i}. {s.summary_text}" for i, s in enumerate(summaries, 1)) or (
         "(no news summaries saved for this date)"
     )
 
     body_lines = [
         f"Article Title: {title}",
         "",
-        f"=== {historical_date.isoformat()} - 100 Years Ago Today ===",
-        entry_text,
+        f"\U0001f4f0 Then & Now | {modern_date.strftime('%d %B')} "
+        f"— {historical_date.year} vs {modern_date.year}",
         "",
-        f"=== {modern_date.isoformat()} - Today's News ===",
+        "\U0001f4dc 100 YEARS AGO TODAY",
+        f'Arthur, our AI citizen of {historical_date.year}, writes in his diary:',
+        f'"{entry_text}"',
+        "",
+        "\U0001f30d TODAY'S NEWS",
         news_block,
     ]
+
+    if echo_then and echo_now:
+        body_lines += [
+            "",
+            "\U0001f517 ECHO OF THE DAY",
+            f"{historical_date.year}: {echo_then}",
+            f"{modern_date.year}: {echo_now}",
+            "(found by embedding similarity, not written by hand)",
+        ]
+
+    if predictions:
+        body_lines += ["", "\U0001f52e TODAY'S PREDICTION(S)"]
+        for p in predictions:
+            body_lines.append(
+                f"{p.statement} by {p.resolution_date.isoformat()} — {p.probability:.0%} likely."
+            )
+        body_lines.append("Logged and locked. We'll report the result either way.")
 
     if client is None:
         client = get_client()

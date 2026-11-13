@@ -24,7 +24,15 @@ from echoledger.approval_email import send_approved_post_email
 from echoledger.approval_tokens import verify_token
 from echoledger.config import LLM_MODEL
 from echoledger.llm.post_title import generate_post_title
-from echoledger.storage.db import get_diary_entry, get_news_summaries, set_diary_approved
+from echoledger.models import EchoCandidate, TodayHeadline
+from echoledger.storage.db import (
+    get_diary_entry,
+    get_echo_candidates,
+    get_news_summaries,
+    get_predictions_created_on,
+    get_today_headlines,
+    set_diary_approved,
+)
 from echoledger.utils.dates import years_later
 
 _RESPONSE_HEADERS = {"Content-Type": "text/html"}
@@ -83,10 +91,43 @@ def _notify_approved_post(
 
     modern_date = years_later(historical_date)
     summaries = get_news_summaries(conn, modern_date)
+    echo_then, echo_now = _pick_best_echo(
+        get_echo_candidates(conn, modern_date), get_today_headlines(conn, modern_date)
+    )
+    predictions = get_predictions_created_on(conn, modern_date)
     try:
         title = generate_title_fn(
             conn, historical_date, modern_date, entry.entry_text, summaries, LLM_MODEL
         )
-        send_approved_post_fn(historical_date, modern_date, entry.entry_text, summaries, title)
+        send_approved_post_fn(
+            historical_date,
+            modern_date,
+            entry.entry_text,
+            summaries,
+            title,
+            echo_then,
+            echo_now,
+            predictions,
+        )
     except Exception as exc:  # noqa: BLE001 - deliberately broad, see docstring
         print(f"  [approved-post email] failed to send for {historical_date}: {exc}")
+
+
+def _pick_best_echo(
+    echo_candidates: list[EchoCandidate], today_headlines: list[TodayHeadline]
+) -> tuple[str | None, str | None]:
+    """The lowest-distance (best) echo match that has a usable headline on
+    both sides, or (None, None) if there isn't one - OCR'd historical
+    headlines are sometimes blank, which makes a poor thing to feature."""
+    headline_by_id = {h.id: h.headline for h in today_headlines}
+    candidates = [
+        c
+        for c in echo_candidates
+        if c.historical_headline.strip() and headline_by_id.get(c.today_headline_id)
+    ]
+    if not candidates:
+        return None, None
+    best = min(candidates, key=lambda c: c.distance)
+    echo_then = " ".join(best.historical_headline.split())
+    echo_now = headline_by_id[best.today_headline_id]
+    return echo_then, echo_now
