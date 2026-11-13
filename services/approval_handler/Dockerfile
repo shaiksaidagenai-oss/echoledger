@@ -6,7 +6,7 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-RUN pip install --no-cache-dir fastapi uvicorn pydantic python-dotenv boto3
+RUN pip install --no-cache-dir fastapi uvicorn pydantic python-dotenv boto3 anthropic
 
 COPY src/echoledger ./src/echoledger/
 COPY services/ ./services/

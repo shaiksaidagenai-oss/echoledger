@@ -16,6 +16,7 @@ from typing import Any
 import boto3
 
 from echoledger.approval_tokens import make_token
+from echoledger.models import NewsSummary
 
 
 def get_client() -> Any:
@@ -65,6 +66,53 @@ def send_approval_email(
         Destination={"ToAddresses": [recipient]},
         Message={
             "Subject": {"Data": f"EchoLedger: Arthur's diary for {date_str} - approval needed"},
+            "Body": {"Text": {"Data": "\n".join(body_lines)}},
+        },
+    )
+
+
+def send_approved_post_email(
+    historical_date: date,
+    modern_date: date,
+    entry_text: str,
+    summaries: list[NewsSummary],
+    title: str,
+    client: Any = None,
+) -> None:
+    """Sent once an entry is approved - a ready-to-copy post combining both
+    halves of 'Then & Now' (Arthur's entry + today's real news) for manual
+    posting to LinkedIn. Goes to a different recipient than the approval
+    email itself (ECHOLEDGER_APPROVED_NOTIFY_EMAIL, not ECHOLEDGER_NOTIFY_EMAIL)."""
+    sender = os.environ["ECHOLEDGER_NOTIFY_EMAIL"]
+    recipient = os.environ["ECHOLEDGER_APPROVED_NOTIFY_EMAIL"]
+
+    news_block = "\n\n".join(f"- {s.summary_text}" for s in summaries) or (
+        "(no news summaries saved for this date)"
+    )
+
+    body_lines = [
+        f"Article Title: {title}",
+        "",
+        f"=== {historical_date.isoformat()} - 100 Years Ago Today ===",
+        entry_text,
+        "",
+        f"=== {modern_date.isoformat()} - Today's News ===",
+        news_block,
+    ]
+
+    if client is None:
+        client = get_client()
+
+    client.send_email(
+        Source=sender,
+        Destination={"ToAddresses": [recipient]},
+        Message={
+            "Subject": {
+                "Data": (
+                    f"{modern_date.isoformat()} EchoLedger: Arthur's diary for "
+                    f"{historical_date.isoformat()} approved for LinkedIn post"
+                )
+            },
             "Body": {"Text": {"Data": "\n".join(body_lines)}},
         },
     )

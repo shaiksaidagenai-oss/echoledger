@@ -1,6 +1,6 @@
 from datetime import date
 
-from echoledger.utils.dates import today, years_ago
+from echoledger.utils.dates import today, years_ago, years_later
 
 
 def test_years_ago_regular_date() -> None:
@@ -25,3 +25,13 @@ def test_years_ago_custom_offset() -> None:
 def test_today_returns_a_date_in_the_configured_timezone() -> None:
     result = today(tz_name="Asia/Kolkata")
     assert isinstance(result, date)
+
+
+def test_years_later_is_the_inverse_of_years_ago() -> None:
+    assert years_later(date(1926, 11, 12), years=100) == date(2026, 11, 12)
+
+
+def test_years_later_leap_day_falls_back_to_feb_28_when_target_year_is_not_leap() -> None:
+    # 2100 is NOT a leap year (divisible by 100 but not 400), so Feb 29, 2100
+    # doesn't exist - falls back to Feb 28, same rule as years_ago.
+    assert years_later(date(2024, 2, 29), years=76) == date(2100, 2, 28)

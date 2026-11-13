@@ -16,11 +16,16 @@ That stays a later step, likely triggering an ECS one-off task instead.
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Callable
 from datetime import date
 from typing import Any
 
+from echoledger.approval_email import send_approved_post_email
 from echoledger.approval_tokens import verify_token
-from echoledger.storage.db import set_diary_approved
+from echoledger.config import LLM_MODEL
+from echoledger.llm.post_title import generate_post_title
+from echoledger.storage.db import get_diary_entry, get_news_summaries, set_diary_approved
+from echoledger.utils.dates import years_later
 
 _RESPONSE_HEADERS = {"Content-Type": "text/html"}
 
@@ -39,6 +44,8 @@ def process_approval(
     token: str | None,
     signing_key: str | None,
     conn: sqlite3.Connection,
+    generate_title_fn: Callable[..., str] = generate_post_title,
+    send_approved_post_fn: Callable[..., None] = send_approved_post_email,
 ) -> dict[str, Any]:
     if not date_str or not action or not token:
         return _html_response(400, "Missing date, action, or signature.")
@@ -53,5 +60,33 @@ def process_approval(
 
     set_diary_approved(conn, on_date, approved=action == "approve")
 
+    if action == "approve":
+        _notify_approved_post(conn, on_date, generate_title_fn, send_approved_post_fn)
+
     verb = "approved" if action == "approve" else "rejected"
     return _html_response(200, f"Arthur's diary entry for {date_str} has been {verb}.")
+
+
+def _notify_approved_post(
+    conn: sqlite3.Connection,
+    historical_date: date,
+    generate_title_fn: Callable[..., str],
+    send_approved_post_fn: Callable[..., None],
+) -> None:
+    """Best-effort: the approve click itself already succeeded (the DB flag
+    is already flipped) by the time this runs, so a hiccup here (a flaky
+    SES/Claude call) must not turn that into an error response for the
+    person who just clicked the link - it's logged and swallowed instead."""
+    entry = get_diary_entry(conn, historical_date)
+    if entry is None:
+        return
+
+    modern_date = years_later(historical_date)
+    summaries = get_news_summaries(conn, modern_date)
+    try:
+        title = generate_title_fn(
+            conn, historical_date, modern_date, entry.entry_text, summaries, LLM_MODEL
+        )
+        send_approved_post_fn(historical_date, modern_date, entry.entry_text, summaries, title)
+    except Exception as exc:  # noqa: BLE001 - deliberately broad, see docstring
+        print(f"  [approved-post email] failed to send for {historical_date}: {exc}")

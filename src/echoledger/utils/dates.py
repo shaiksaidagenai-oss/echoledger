@@ -25,3 +25,10 @@ def years_ago(on_date: date, years: int = 100) -> date:
         return on_date.replace(year=target_year)
     except ValueError:
         return date(target_year, 2, 28)
+
+
+def years_later(on_date: date, years: int = 100) -> date:
+    """Inverse of years_ago - the modern-day counterpart of a historical
+    date (e.g. Arthur's 1926-11-12 entry pairs with real news from
+    2026-11-12)."""
+    return years_ago(on_date, years=-years)
